@@ -127,7 +127,7 @@ type Config struct {
 	TimeZone string `toml:"timezone"`
 
 	// Master switch for the web panel. false = never listen on a port; run
-	// monitoring and WeChat push only.
+	// monitoring and WxPusher push only.
 	EnablePanel bool `toml:"enable_panel"`
 
 	// UI language: 中文 / English. Takes effect after restart (see i18n.go).
@@ -139,8 +139,9 @@ type Config struct {
 	MaxListLen       int    `toml:"max_list_len"`       // max records returned per API call
 	HistoryScanCount int    `toml:"history_scan_count"` // journals to re-scan when ship data is missing
 
-	// WxPusher is a third-party push service (wxpusher.zjiecode.com) delivered
-	// via a WeChat service account; not an official WeChat API.
+	// WxPusher is a third-party push service (wxpusher.zjiecode.com), not an
+	// official WeChat API. Alerts are delivered to WeChat through the service
+	// account you bind on their side.
 	WxPusher struct {
 		URL      string `toml:"url"`
 		AppToken string `toml:"app_token"`
@@ -223,8 +224,8 @@ type pendingLog func() string
 // wholesale. It returns the config plus the messages to log; it never logs
 // itself, because the language is not known this early (see pendingLog), and it
 // never rewrites the file — a config the user hand-edits must not change
-// underneath them. Migrating an older config.toml is a one-off job for
-// tools/migrate_config.py, not something the binary does at every startup.
+// underneath them. Migrating an older config.json is a one-off manual job, not
+// something the binary does at every startup.
 func loadConfig() (Config, []pendingLog) {
 	c := defaultConfig()
 	path := configPath()
@@ -279,8 +280,11 @@ const configHeader = `# Elite Dangerous Journal Monitor - configuration
 # timezone: UTC+8 (default) | UTC | auto | UTC+5:30   (see tz.go)
 # enable_panel = false never opens a port; monitoring and push still run.
 #   为 false 时完全不监听端口，只运行监控与推送。
-# wxpusher: third-party push service (wxpusher.zjiecode.com), delivered through
-#   a WeChat service account. Credentials stay on this machine only.
+# wxpusher: alerts go out through WxPusher (wxpusher.zjiecode.com), a
+#   third-party push service - not an official WeChat API. Fill in app_token
+#   and uid to enable alerts; leave both empty to monitor without push.
+#   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
+#   两者留空则只监控。凭据只留在本机，请勿外传。
 # language: 中文 | English   (restart to apply / 重启生效)
 #
 # Delete this file to regenerate it from the built-in defaults.
@@ -919,7 +923,7 @@ func (m *monitor) checkStall(logName string) {
 		fmtTime(time.Now().UTC()), dur)
 	m.messages = append(m.messages, stallLine)
 
-	// WeChat push: one-line alert plus the last record time for troubleshooting
+	// WxPusher push: one-line alert plus the last record time for troubleshooting
 	text := T("wx.stall_body", dur, fmtTime(m.lastActivity))
 
 	log.Println(T("log.stall_silent", dur))

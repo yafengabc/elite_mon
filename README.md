@@ -7,7 +7,8 @@ journal files and turns them into the three things you actually want while playi
 or while *not* playing:
 
 - **Kill & bounty stats** — total kills, total bounty, rolling windows, mission rewards.
-- **Shield-drop alerts** — the moment your shields go down, you get a push to WeChat.
+- **Shield-drop alerts** — the moment your shields go down, an alert is pushed through
+  [WxPusher](https://wxpusher.zjiecode.com), a third-party push service.
 - **Log-silence alerts** — if the journal stops growing while you are AFK, the game has
   almost certainly disconnected. You get told, instead of finding out hours later.
 - **Plus a web panel** — reachable from your phone or another PC on the same LAN: live
@@ -20,7 +21,7 @@ or while *not* playing:
 | | |
 |---|---|
 | **Statistics** | Total kills and bounty, "last N" windows, per-kill bounty log, mission reward breakdown, kill-trend chart (last 10 min / last 1 h), session totals |
-| **Alerts** | Shield drop and log silence, pushed through [WxPusher](https://wxpusher.zjiecode.com) to WeChat. Repeated silence alerts are capped so an overnight disconnect cannot spam you |
+| **Alerts** | Shield drop and log silence, pushed through [WxPusher](https://wxpusher.zjiecode.com) — a third-party push service, not an official WeChat API. Repeated silence alerts are capped so an overnight disconnect cannot spam you |
 | **Ship info** | Current ship, name/ID, cargo, main and reserve fuel — recovered from older journals when the current one has no `Loadout` event yet |
 | **Web panel** | Live status, trend chart (inline SVG), bounty log, event stream. Served over the LAN, gzip-compressed, no build step, no CDN |
 | **Bilingual UI** | 中文 / English, switchable in the config. Translations live in editable TOML files — adding a language needs no recompilation |
@@ -47,7 +48,8 @@ reports are welcome.
 
 1. Put the executable in its own folder and run it. On first run it writes `config.toml`
    and a `lang/` directory beside itself.
-2. Open `config.toml`. If you want WeChat push, fill in your WxPusher credentials:
+2. Open `config.toml`. If you want push alerts, fill in your WxPusher credentials
+   (details in [Configuration](#configuration)):
 
    ```toml
    [wxpusher]
@@ -66,13 +68,98 @@ The monitor finds your journals automatically:
 %USERPROFILE%\Saved Games\Frontier Developments\Elite Dangerous\
 ```
 
-> **Keep `config.toml` private.** It holds a push credential that can send messages to
-> your WeChat. It is git-ignored here for that reason.
+> **Keep `config.toml` private.** It holds a credential that can push messages on your
+> behalf. It is git-ignored here for that reason.
 
 ## Configuration
 
-`config.toml` is read once at startup — restart to apply changes. Duration fields accept
-`30s` / `5m` / `1h`; deleting the file regenerates it from the built-in defaults.
+Every setting lives in `config.toml` — a plain TOML file **next to the executable**:
+
+| Interface | How to open it |
+|---|---|
+| Win32 | *File → Open config* (`Ctrl+C`) opens it in your default editor |
+| Tk | the *Open config* button on the main window |
+| Console | edit the file by hand in the folder you unzipped into |
+
+There is no installer and no registry entry: the file is created from the built-in
+defaults on first run, and **deleting it regenerates those defaults**.
+
+Rules of thumb when editing:
+
+- **Restart the program after saving.** The file is read once at startup; nothing is
+  hot-reloaded.
+- Keep the key names, change only what is right of the `=`: strings need double quotes
+  (`language = "English"`), booleans are lowercase (`true` / `false`), integers are bare
+  (`max_list_len = 200`).
+- Durations are strings with a unit suffix: `"500ms"`, `"2s"`, `"5m"`, `"1h"`.
+- A misspelled key is ignored as an unknown entry, but **a syntax error drops the whole
+  file back to the defaults** and says so in the log box — if a change seems to have had
+  no effect, read the log first.
+
+A complete file looks like this (the copy on disk already carries these comments, so
+just edit the values):
+
+```toml
+# Elite Dangerous Journal Monitor - configuration
+#
+# Restart the program after editing. / 修改后重启程序生效。
+# Durations accept 30s / 5m / 1h. / 时间字段支持 30s / 5m / 1h 这类写法。
+# timezone: UTC+8 (default) | UTC | auto | UTC+5:30   (see tz.go)
+# enable_panel = false never opens a port; monitoring and push still run.
+#   为 false 时完全不监听端口，只运行监控与推送。
+# wxpusher: alerts go out through WxPusher (wxpusher.zjiecode.com), a
+#   third-party push service - not an official WeChat API. Fill in app_token
+#   and uid to enable alerts; leave both empty to monitor without push.
+#   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
+#   两者留空则只监控。凭据只留在本机，请勿外传。
+# language: 中文 | English   (restart to apply / 重启生效)
+#
+# Delete this file to regenerate it from the built-in defaults.
+# 删掉本文件会按内置默认值重新生成一份。
+listen_addr = ":8088"
+timezone = "UTC+8"
+enable_panel = true
+language = "中文"
+poll_interval = "2s"
+stall_threshold = "10m"
+stat_window = "1h"
+max_list_len = 200
+history_scan_count = 5
+
+[wxpusher]
+  url = "https://wxpusher.zjiecode.com/api/send/message"
+  app_token = ""
+  uid = ""
+```
+
+### Common edits
+
+**Switch the UI language** — `language = "English"` (`"中文"` / `"zh"` / `"en"` are all
+accepted).
+
+**Keep the panel off the LAN** — `listen_addr = "127.0.0.1:8088"`.
+
+**Turn the web panel off entirely** — `enable_panel = false` never listens on a port;
+monitoring and push keep running.
+
+**Enable push alerts** — sign up at [WxPusher](https://wxpusher.zjiecode.com), copy your
+app token and user UID, and fill in the `[wxpusher]` table:
+
+```toml
+[wxpusher]
+  url = "https://wxpusher.zjiecode.com/api/send/message"   # leave as is
+  app_token = "AT_..."                                     # your app token
+  uid = "UID_..."                                          # your user UID
+```
+
+Both values must be present or push stays off. Startup logs which state you are in
+(`WxPusher: enabled` or `WxPusher push: app token / user UID not set, push disabled`);
+the Win32 build also shows a `WxPusher` line on the *Status* tab.
+
+**Warn later about a silent journal** — if `stall_threshold = "10m"` is too eager for a
+long AFK session, raise it to `"30m"` or `"1h"`.
+
+### Keys
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -85,9 +172,9 @@ The monitor finds your journals automatically:
 | `stat_window` | `"1h"` | Window used for the "last N" statistics |
 | `max_list_len` | `200` | Maximum records returned per API call |
 | `history_scan_count` | `5` | Historical journals to scan when ship data is missing |
-| `wxpusher.url` | WxPusher endpoint | Push service endpoint |
-| `wxpusher.app_token` | — | Your WxPusher app token |
-| `wxpusher.uid` | — | Your WxPusher user UID |
+| `wxpusher.url` | WxPusher endpoint | Push service endpoint; rarely needs changing |
+| `wxpusher.app_token` | — | Your WxPusher app token (empty = no push) |
+| `wxpusher.uid` | — | Your WxPusher user UID (empty = no push) |
 
 ## Web panel
 
@@ -182,7 +269,7 @@ src/                  Go sources (single main package) + embedded frontend
   ├─ icon/ app.manifest program icon and Windows visual-style manifest
   ├─ win32.go gui.go    Win32 UI          console.go  console entry points
   └─ tk.go              Tk UI
-tools/                dev-time helpers (make_icon.py, migrate_config.py)
+tools/                dev-time helpers (make_icon.py)
 build.sh              build / check / upx / clean
 ```
 
@@ -196,8 +283,9 @@ Release.
 
 - **Unofficial.** Not affiliated with or endorsed by Frontier Developments. *Elite
   Dangerous* is a trademark of Frontier Developments plc.
-- Push delivery uses [WxPusher](https://wxpusher.zjiecode.com), a third-party service that
-  delivers via a WeChat service account. It is not an official WeChat API.
+- Push goes through [WxPusher](https://wxpusher.zjiecode.com), a third-party push
+  provider — not an official WeChat API. How it reaches you is its call; typically a
+  message from its WeChat service account.
 - Journal timestamps are UTC; everything displayed goes through the configured timezone.
 
 ## License
