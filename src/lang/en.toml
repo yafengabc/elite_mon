@@ -1,0 +1,253 @@
+# Elite Dangerous Journal Monitor - language file: English (en)
+#
+# This file is read at startup, next to the program's lang/ directory. Edit it
+# and restart the program - there is nothing to recompile.
+#
+#   * The keys under [strings] are stable ids used by the code. Never rename or
+#     translate them; only change the text on the right of "=".
+#   * A value may contain {0}, {1}, ... which the program fills in. Keep every
+#     placeholder the original text had, and do not invent new ones.
+#   * Adding a language: copy this file to lang/<code>.toml, change code / names
+#     / tag below, translate the [strings] values, then put that code in
+#     config.toml's "language" field. Untranslated ids fall back to the built-in
+#     base language, so a half-done file is usable.
+#   * Deleting this file is harmless: the built-in copy is used again.
+#
+# 本文件在启动时读取（位于程序旁的 lang/ 目录）。改完重启程序即可生效，无需编译。
+#   * [strings] 下的 key 是代码使用的稳定 ID，不要改名或翻译，只改 "=" 右边的文案。
+#   * 文案里的 {0} {1} 是程序填的占位符；原有占位符要保留，不要自己新增。
+#   * 加一门语言：把本文件复制成 lang/<code>.toml，改下面的 code / names / tag，
+#     翻译 [strings] 的值，再把该 code 填进 config.toml 的 language 字段。
+#     没翻译的 ID 会回退到内置基础语言，所以翻一半也能用。
+#   * 删掉本文件不影响启动：会自动回退到内置的同一份文案。
+
+code  = "en"
+tag   = "en"
+# config.toml 的 language 字段接受的写法（不区分大小写）
+# "language" values accepted in config.toml (case-insensitive)
+names = ["en", "english", "英文"]
+
+# 日志行里出现这些词会被标红 / 标黄。必须匹配本语言日志的真实措辞。
+# Substrings that colour a log line red / yellow - must match what
+# this language's log lines really say.
+err_words  = ["failed", "error", "exception", "cannot", "unable", "panic"]
+warn_words = ["warning", "dropping"]
+
+# 本语言没有额外的时区写法（tz.go 已含英语写法）；
+# 需要时在这里加一个 [tz_words] 段： "日本時間" = "utc"
+# No extra timezone spellings for this language; add a
+# [tz_words] section here if it needs its own.
+
+# ---- app / window   程序与窗口 ----
+[strings.app]
+init  = "Initializing…"
+title = "ED Real-time Monitor"
+
+# ---- tabs and page titles   页签与页面标题 ----
+[strings.tab]
+bounty         = "Bounty Log"
+bounty_mission = "Bounty Log (incl. mission reward)"
+data           = "Data Panel"
+events         = "Events"
+ship           = "Ship Info"
+status         = "Status"
+summary        = "Summary"
+
+# ---- about dialog   关于对话框 ----
+[strings.about]
+desc            = "Elite Dangerous journal monitor: kill/bounty stats, shield-drop push, web panel."
+enabled         = "Enabled"
+lbl_config_file = "Config file    {0}"
+lbl_journal_dir = "Journal dir {0}"
+lbl_listen_addr = "Listen addr    {0}"
+lbl_version     = "Version        {0}"
+lbl_wx          = "WeChat push    {0}"
+panel_url       = "Web panel   http://localhost{0}"
+params          = "Params    scan {0}    stall {1}    window {2}"
+push_disabled   = "App token / user UID not set, push disabled"
+
+# ---- buttons, menus, dialogs   按钮、菜单、对话框 ----
+[strings.gui]
+cannot_open          = "Cannot open:\n{0}"
+clear_log_acc        = "Clear Log Window (&C)"
+close_exits          = "Close window to exit"
+close_hint           = "Window can be closed to tray; monitor and push keep running."
+close_hint_tray      = "Closing window minimizes to tray; right-click tray icon to exit"
+exit                 = "Exit"
+exit_acc             = "Exit (&X)"
+log_cleared          = "Log window cleared"
+menu_about           = "About"
+menu_about_acc       = "About (&A)"
+menu_file_acc        = "File (&F)"
+menu_help_acc        = "Help (&H)"
+menu_view_acc        = "View (&V)"
+open_config          = "Open Config"
+open_config_file_acc = "Open Config File (&C)"
+open_failed          = "Open failed"
+open_web             = "Open Web"
+open_web_panel_acc   = "Open Web Panel (&W)"
+panel_disabled_msg   = "Web panel is disabled by config (config.toml \"enable_panel\" = false).\nSet it back to true and restart to enable."
+panel_disabled_title = "Web Panel Disabled"
+show_window_acc      = "Show Window (&O)"
+tray_tip             = "Monitor and WeChat push still run in background; double-click the tray icon to reopen."
+tray_unavailable     = "Tray icon unavailable; closing window exits"
+
+# ---- status bar and status line   状态栏与状态行 ----
+[strings.status]
+current_log   = "Current log {0}"
+lan           = "LAN {0}"
+lan_pad       = "     LAN {0}"
+listening     = "Listening {0}"
+missions      = "Missions {0}/{1}"
+monitoring    = "Monitoring running"
+panel_off     = "Web panel disabled"
+prefix_error  = "[Error] {0}"
+prefix_warn   = "[Warning] {0}"
+scan_interval = "Scan interval {0}"
+span_kills    = "Kills in last {0} {1}"
+total_bounty  = "Total bounty {0} Cr"
+total_kills   = "Total kills {0}"
+updated       = "Updated {0}"
+updated_dash  = "Updated -"
+
+# ---- data panel summary   数据面板汇总 ----
+[strings.summary]
+missions         = "Missions: {0} done / {1} total ({2} active)"
+missions_none    = "Missions: no data (no Missions event read)"
+ship_unavailable = "Cannot read ship info"
+span_bounty      = "Bounty in last {0}: {1} Cr"
+span_kills       = "Kills in last {0}: {1}"
+total_bounty     = "Total bounty: {0} Cr"
+total_kills      = "Total kills: {0}"
+
+# ---- ship info   舰船信息 ----
+[strings.ship]
+cargo             = "Cargo: {0} / {1}"
+in_fighter        = "● Currently in fighter / SRV"
+in_fighter_inline = "    ● Currently in fighter / SRV"
+main_fuel         = "Main fuel: {0} t / {1} t ({2}%)"
+name              = "Name: {0} / {1}"
+reserve_fuel      = "Reserve fuel: {0} t"
+vessel            = "Ship: {0}"
+vessel_label      = "Ship: "
+waiting           = "Waiting for ship data..."
+
+# ---- event messages   事件消息 ----
+[strings.msg]
+cargo_scanned     = "Cargo scanned"
+fighter_deployed  = "Fighter launched"
+fighter_destroyed = "Fighter destroyed"
+fighter_docked    = "Fighter docked"
+kill_target       = "Kill target: {0}"
+stall_paused      = "{0} | 📴 Log paused {1} with no new records; game may have disconnected, please handle"
+
+# ---- bounty   赏金 ----
+[strings.bounty]
+kill_line      = "Criminal eliminated: {0} | bounty {1} Cr"
+mission        = "Mission reward"
+shield_line    = "{0} | 🚨 Shields down | Ship: {1}"
+unknown_ship   = "Unknown ship"
+unknown_target = "Unknown target"
+
+# ---- WeChat push / WxPusher   微信推送 ----
+[strings.wx]
+enabled          = "WxPusher: enabled"
+json_error       = "WxPusher JSON error: {0}"
+not_configured   = "WeChat push: app token / user UID not set, push disabled"
+parse_failed     = "WxPusher response parse failed: {0}"
+push_ok          = "WxPusher push succeeded: {0}"
+send_failed      = "WxPusher send failed: {0}"
+send_failed_code = "WxPusher send failed: code={0} msg={1}\n"
+shield_down      = "🚨 Shield down\nTime: {0}\nShip: {1}"
+shield_title     = "Shield Alert"
+stall_body       = "📴 Log seems stuck\nLog has had no new records for {0}; the game likely disconnected. Please check when you can.\nLast record: {1}"
+stall_title      = "Log Silence Alert"
+too_many         = "Too many WxPusher in-flight requests, dropping push: {0}"
+
+# ---- runtime logs   运行日志 ----
+[strings.log]
+cfg_default_created  = "Default config created: {0}"
+cfg_parse_failed     = "Config parse failed, falling back to defaults: {0}"
+cfg_write_failed     = "Cannot write config, using defaults: {0}"
+config_file          = "Config file: {0}"
+gui_started          = "GUI started; closing window minimizes to tray"
+journal_dir          = "Journal dir: {0}"
+lang_dir_created     = "Language files created in {0} (edit and restart - no rebuild needed)"
+lang_dir_failed      = "Cannot create the language directory {0} ({1}); using built-in text only"
+lang_file_missing    = "Language file {0} is missing, using the built-in text (delete the whole lang directory to regenerate)"
+lang_missing_ids     = "Language file {0} is missing {1} strings, filled from the built-in copy"
+lang_parse_failed    = "Language file parse failed, using built-in text: {0} ({1})"
+lang_unknown_ids     = "Language file {0} has {1} unknown entries (mis-typed id or field name?)"
+last_shield_drop     = "Latest historical shield drop: {0}"
+minimized            = "Minimized to tray"
+monitor_error        = "Monitor error: {0}"
+monitor_panic        = "Monitor goroutine panic, skipping round: {0}"
+new_session          = "New session log detected: {0}"
+new_shield_drop      = "🚨 New shield drop detected: {0}"
+no_logfile           = "No log file found"
+panel_addr           = "Panel: http://localhost{0}"
+panel_i18n_failed    = "Panel language table write failed: {0}"
+panel_off            = "Web panel: disabled by config (no listening)"
+panel_off_note       = "Web panel disabled by config: not listening, monitor and push only"
+panel_start_failed   = "Panel server failed to start: {0}"
+scan_params          = "Scan: {0} | Stall alert: {1} | Stat window: {2}"
+shield_ready         = "Shield monitor initialized"
+ship_recovered       = "Recovered ship data from history: {0} (cargo {1} / fuel {2})\n"
+stall_capped         = "⚠️ Log-silence alert hit {0}-time limit, no further pushes (resets on activity)"
+stall_silent         = "⚠️ Log silent {0}, push alert"
+tk_build_failed      = "[tk] build UI failed: {0}"
+tk_eval_init_failed  = "[tk] init eval ext failed: {0}"
+tk_open_failed       = "[tk] open failed: {0} {1}"
+tk_set_var           = "[tk] set var {0} failed: {1}"
+tk_tcl_error         = "[tk] Tcl error: {0} | script: {1}"
+tk_update            = "[tk] update {0} failed: {1}"
+tray_reg_failed      = "Tray icon registration failed; closing window exits"
+tz_display           = "Timezone: {0}"
+tz_unknown           = "Unrecognized timezone {0}, falling back to UTC+8"
+version              = "Version: {0}"
+win_class_reg_failed = "Window class registration failed"
+win_create_failed    = "Window creation failed"
+
+# ---- timezone   时区 ----
+[strings.tz]
+auto_local = "Auto (local {0})"
+
+# ---- emoji text tags for the log box   日志框的 emoji 文字标记 ----
+[strings.tag]
+done   = "[DONE]"
+shield = "[SHIELD]"
+silent = "[SILENT]"
+warn   = "[WARN]"
+
+# ---- shared bits   通用片段 ----
+[strings.common]
+fighter        = "Fighter"
+mission_note   = "(incl. mission reward {0} Cr)"
+none           = "none"
+span_hours     = "{0} h"
+span_hours_min = "{0} h {1} min"
+span_min       = "{0} min"
+span_sec       = "{0} s"
+stat_window_1h = "1 h"
+unknown        = "Unknown"
+
+# ---- web panel   网页面板 ----
+[strings.panel]
+connect_failed = "⚠ Cannot connect to monitor service ({0})"
+legend_10m     = "Kills (last 10 min)"
+legend_1h      = "Kills (last 1 h)"
+loading        = "Loading..."
+log_file       = "Current log file: {0}"
+no_events      = "No event messages"
+no_kill_log    = "No kill log yet"
+no_trend       = "No trend data yet"
+session        = "Session"
+span_bounty    = "Bounty in last {0}: {1}"
+tip            = "{0} | last 10 min {1} kills | last 1 h {2} kills | bounty {3} Cr"
+title          = "ED Real-time Monitor Panel"
+total_bounty   = "Total bounty: {0}"
+trend_all      = "Whole session {0}"
+trend_none     = "Whole session {0} no kill records"
+trend_title    = "Kill Trend"
+updated_suffix = " | Updated {0}"
+window_title   = "ED Monitor Panel"

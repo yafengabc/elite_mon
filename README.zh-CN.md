@@ -1,0 +1,196 @@
+# 精英危险 日志监控
+
+**中文说明** · [English](README.md)
+
+一个自包含的《精英危险》桌面监控小工具。它跟随游戏的 Journal 日志，把它变成你在游戏时
+（以及**不在**游戏时）真正需要的三件事：
+
+- **击杀与赏金统计**——总击杀、总赏金、滚动窗口、任务赏金。
+- **掉盾告警**——护盾被打掉的瞬间推送到微信。
+- **日志静默告警**——挂机时如果日志不再增长，多半是游戏掉线了。你会收到提醒，而不是
+  几小时后才发现。
+- **外加一个网页面板**——手机或局域网内另一台电脑都能打开：实时状态、击杀趋势图、
+  赏金日志、原始事件流。
+
+<img src="docs/win32-zh.png" alt="Win32 界面" width="720">
+
+## 功能
+
+| | |
+|---|---|
+| **统计** | 总击杀与总赏金、「最近 N」窗口、逐条赏金日志、任务赏金拆分、击杀趋势图（最近 10 分钟 / 最近 1 小时）、本局汇总 |
+| **告警** | 掉盾与日志静默，经 [WxPusher](https://wxpusher.zjiecode.com) 推送到微信。静默提醒有次数上限，整夜掉线不会持续刷屏 |
+| **舰船信息** | 当前舰船、船名/编号、货舱、主油箱与储备仓——当前日志还没有 `Loadout` 事件时，会从历史日志补齐 |
+| **网页面板** | 实时状态、趋势图（内联 SVG）、赏金日志、事件流。局域网可访问、gzip 压缩、无构建步骤、不依赖 CDN |
+| **中英双语界面** | 配置里切换。翻译放在可编辑的 TOML 文件里，加一门语言**不需要重新编译** |
+| **自包含** | 单文件可执行程序。无需安装器、无运行时依赖、无 DLL、**无 CGO**——Tk 版把 Tcl/Tk 9.0 以纯 Go 形式内嵌 |
+| **配置可编辑** | 程序旁的纯 TOML 文件，默认值与说明就写在文件里 |
+
+## 下载
+
+到 [Releases](../../releases) 取你要的产物：
+
+| 文件 | 平台 | 说明 |
+|---|---|---|
+| `elite_mon_win32.exe` | Windows | **推荐。** 原生 Win32 界面——纯 Win32 SDK，无第三方 UI 库。跟随系统视觉样式；带托盘图标；关闭窗口即最小化到托盘 |
+| `elite_mon_tk.exe` | Windows | Tk 9.0 界面，按喜好选择；无需附带 DLL |
+| `elite_mon.exe` | Windows | 控制台版——无窗口，日志走 stderr |
+| `elite_mon_tk_linux_amd64` | Linux | Tk 界面 |
+| `elite_mon_linux_amd64` | Linux | 控制台版 |
+
+两个 Linux 产物是**从 Windows 交叉编译、已验证可构建，但尚未在真实 Linux 桌面上跑过**——
+经过实测的是 Windows 那几个。欢迎反馈问题。
+
+## 快速开始
+
+1. 把可执行文件放进一个单独的目录并运行。首次运行会在它旁边生成 `config.toml` 和
+   `lang/` 目录。
+2. 打开 `config.toml`。想用微信推送就填上 WxPusher 凭据：
+
+   ```toml
+   [wxpusher]
+     url = "https://wxpusher.zjiecode.com/api/send/message"
+     app_token = "AT_..."   # 你的 WxPusher 应用令牌
+     uid = "UID_..."        # 你的 WxPusher 用户 UID
+   ```
+
+   留空也能正常监控，只是不推送。
+3. 重启程序。完成：面板在 `http://localhost:8088`，局域网内其他设备访问
+   `http://<你的局域网IP>:8088`。
+
+Journal 目录是自动定位的：
+
+```
+%USERPROFILE%\Saved Games\Frontier Developments\Elite Dangerous\
+```
+
+> **`config.toml` 请勿外传。** 里面是可以往你微信发消息的推送凭据，本仓库已把它加入
+> `.gitignore`。
+
+## 配置
+
+`config.toml` 只在启动时读取一次——改完重启生效。时间字段支持 `30s` / `5m` / `1h`；
+删掉文件会按内置默认值重新生成。
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `listen_addr` | `":8088"` | 面板监听地址。填 `"127.0.0.1:8088"` 可只允许本机访问 |
+| `timezone` | `"UTC+8"` | 显示时区。支持 `UTC+8`、`UTC`、`auto`、`UTC+5:30`、`北京时间` |
+| `enable_panel` | `true` | 为 `false` 时完全不监听端口——监控与推送照常运行 |
+| `language` | `"中文"` | `中文` 或 `English` |
+| `poll_interval` | `"2s"` | 重新读取日志的间隔 |
+| `stall_threshold` | `"10m"` | 日志静默多久后推送提醒 |
+| `stat_window` | `"1h"` | 「最近 N」统计所用的窗口 |
+| `max_list_len` | `200` | 单次接口调用最多返回的记录条数 |
+| `history_scan_count` | `5` | 舰船数据缺失时回溯的历史日志份数 |
+| `wxpusher.url` | WxPusher 接口 | 推送服务地址 |
+| `wxpusher.app_token` | — | 你的 WxPusher 应用令牌 |
+| `wxpusher.uid` | — | 你的 WxPusher 用户 UID |
+
+## 网页面板
+
+<img src="docs/panel-en.png" alt="网页面板" width="620">
+
+背后有两个接口：
+
+- `GET /api/status`——面板渲染所需的全部内容（统计、舰船状态、赏金记录、击杀趋势、
+  最近事件行）。gzip 压缩。
+- `GET /api/i18n`——当前语言表，保证面板与桌面界面的措辞永远一致。
+
+面板的静态文件由二进制自身提供，按固定虚拟视口整体缩放，所以手机上看到的效果和桌面一致。
+
+## 三种界面
+
+<table>
+<tr>
+<td><img src="docs/win32-en.png" alt="Win32 英文" width="380"></td>
+<td><img src="docs/tk-en.png" alt="Tk" width="380"></td>
+</tr>
+<tr>
+<td align="center">Win32（English）</td>
+<td align="center">Tk</td>
+</tr>
+</table>
+
+| 构建标签 | 结果 |
+|---|---|
+| *（无）* | 控制台 |
+| Windows 上的 `gui` | 原生 Win32 界面（`src/win32.go` + `src/gui.go`） |
+| Linux 上的 `gui`，或 Windows 上的 `gui,tk` | Tk 界面（`src/tk.go`） |
+
+所有形态共用同一套监控核心与内嵌前端，差别只在两个入口函数（`startLogging` 与 `runUI`）。
+
+## 语言文件
+
+翻译放在 `src/lang/*.toml`，编译进二进制，首次运行时释放到配置旁的 `lang/` 目录。
+改完文件重启即可生效——**没有任何需要重新编译的东西**：
+
+```toml
+[strings.panel]
+title = "精英危险 实时监控面板"
+```
+
+要加一门语言：把 `lang/en.toml` 复制成 `lang/ja.toml`，改 `code` / `tag` / `names`，
+翻译 `[strings]` 各表，再把 `config.toml` 里的 `language` 改成 `"ja"`。没翻到的 ID 会
+回退到基础语言，所以翻一半也能用。另有两个字段决定日志行的着色：
+
+```toml
+err_words  = ["失败", "错误"]   # 含这些词的行显示为红色
+warn_words = ["警告", "丢弃"]   # 含这些词的显示为黄色
+```
+
+## 从源码构建
+
+需要 [Go](https://go.dev/dl/) 1.26 或更新版本。**无需 CGO、gcc、MSYS2**——所有形态都能
+从纯净工具链构建。
+
+```sh
+git clone <本仓库>
+cd elite_mon_ui
+
+./build.sh all     # 控制台 + Win32 + Tk + 两个 Linux 交叉编译产物 → Release/
+./build.sh check   # 对每种形态跑 gofmt + vet + test
+```
+
+在 Windows 上脚本会自动获取 [`rsrc`](https://github.com/akavel/rsrc)，把视觉样式清单和
+程序图标编译进可执行文件。正是这份清单让 Windows 用系统主题绘制控件，而不是退回
+Windows 95 外观——所以请始终通过 `./build.sh` 构建：直接 `go build ./src` 出来的产物
+没有清单也没有图标。
+
+「帮助 → 关于」里的版本号来自 `git describe --tags`，再加上 Go 工具链自动打进的提交哈希
+与提交日期（形如 `v1.0.0 (a1b2c3d, 2026-09-15, clean)`）。在 git 仓库之外构建会显示
+`dev`。
+
+### 目录结构
+
+```
+src/                  Go 源码（单一 main 包）+ 内嵌前端
+  ├─ elite_monitor.go   日志解析、统计、HTTP 面板
+  ├─ version.go         构建身份信息
+  ├─ i18n.go            翻译引擎（ID、回退、占位符格式化）
+  ├─ i18n_lang.go       加载 src/lang/*.toml，并释放到配置旁
+  ├─ lang/*.toml        翻译（内嵌，运行期可编辑）
+  ├─ static/            网页面板：index.html、style.css、main.js（//go:embed）
+  ├─ icon/ app.manifest 程序图标与 Windows 视觉样式清单
+  ├─ win32.go gui.go    Win32 界面      console.go  控制台入口
+  └─ tk.go              Tk 界面
+tools/                开发期辅助脚本（make_icon.py、migrate_config.py）
+build.sh              构建 / 检查 / upx / 清理
+```
+
+## 发布
+
+推送形如 `v*` 的 tag 会触发 CI（`windows-latest`，不需要任何编译器）执行
+`./build.sh all`，把 5 个产物连同 `SHA256SUMS.txt` 挂到 GitHub Release 上。
+
+## 说明
+
+- **非官方项目。** 与 Frontier Developments 无隶属或背书关系。*Elite Dangerous* 是
+  Frontier Developments plc 的商标。
+- 推送依赖 [WxPusher](https://wxpusher.zjiecode.com)——一个经微信服务号送达的第三方
+  服务，不是微信官方接口。
+- Journal 里的时间戳一律是 UTC，所有显示时间都经过配置的时区转换。
+
+## 许可证
+
+[MIT](LICENSE)
