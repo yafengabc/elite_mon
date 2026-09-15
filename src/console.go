@@ -40,7 +40,7 @@ func startLogging() {}
 // (the old console build used log.Fatal; that behavior is preserved).
 //
 // With "enable_panel": false it listens on no port and degrades to pure
-// monitoring: WeChat push still works, there is just no panel to view, and the
+// monitoring: WxPusher push still works, there is just no panel to view, and the
 // main thread then sleeps forever.
 func runUI() {
 	if !cfg.EnablePanel {

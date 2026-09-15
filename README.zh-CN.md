@@ -6,7 +6,7 @@
 （以及**不在**游戏时）真正需要的三件事：
 
 - **击杀与赏金统计**——总击杀、总赏金、滚动窗口、任务赏金。
-- **掉盾告警**——护盾被打掉的瞬间推送到微信。
+- **掉盾告警**——护盾被打掉的瞬间，经 [WxPusher](https://wxpusher.zjiecode.com) 推送提醒。
 - **日志静默告警**——挂机时如果日志不再增长，多半是游戏掉线了。你会收到提醒，而不是
   几小时后才发现。
 - **外加一个网页面板**——手机或局域网内另一台电脑都能打开：实时状态、击杀趋势图、
@@ -19,7 +19,7 @@
 | | |
 |---|---|
 | **统计** | 总击杀与总赏金、「最近 N」窗口、逐条赏金日志、任务赏金拆分、击杀趋势图（最近 10 分钟 / 最近 1 小时）、本局汇总 |
-| **告警** | 掉盾与日志静默，经 [WxPusher](https://wxpusher.zjiecode.com) 推送到微信。静默提醒有次数上限，整夜掉线不会持续刷屏 |
+| **告警** | 掉盾与日志静默，经 [WxPusher](https://wxpusher.zjiecode.com) 推送提醒——第三方推送服务，非微信官方接口。静默提醒有次数上限，整夜掉线不会持续刷屏 |
 | **舰船信息** | 当前舰船、船名/编号、货舱、主油箱与储备仓——当前日志还没有 `Loadout` 事件时，会从历史日志补齐 |
 | **网页面板** | 实时状态、趋势图（内联 SVG）、赏金日志、事件流。局域网可访问、gzip 压缩、无构建步骤、不依赖 CDN |
 | **中英双语界面** | 配置里切换。翻译放在可编辑的 TOML 文件里，加一门语言**不需要重新编译** |
@@ -45,7 +45,7 @@
 
 1. 把可执行文件放进一个单独的目录并运行。首次运行会在它旁边生成 `config.toml` 和
    `lang/` 目录。
-2. 打开 `config.toml`。想用微信推送就填上 WxPusher 凭据：
+2. 打开 `config.toml`。想收推送提醒就填上 WxPusher 凭据（见[配置](#配置)一节）：
 
    ```toml
    [wxpusher]
@@ -64,13 +64,91 @@ Journal 目录是自动定位的：
 %USERPROFILE%\Saved Games\Frontier Developments\Elite Dangerous\
 ```
 
-> **`config.toml` 请勿外传。** 里面是可以往你微信发消息的推送凭据，本仓库已把它加入
+> **`config.toml` 请勿外传。** 里面是能替你做推送的凭据，本仓库已把它加入
 > `.gitignore`。
 
 ## 配置
 
-`config.toml` 只在启动时读取一次——改完重启生效。时间字段支持 `30s` / `5m` / `1h`；
-删掉文件会按内置默认值重新生成。
+所有设置都在 `config.toml` 一个文件里——**纯 TOML，就在可执行文件旁边**：
+
+| 界面 | 怎么打开它 |
+|---|---|
+| Win32 | 菜单「文件 → 打开配置」（快捷键 `Ctrl+C`），用系统默认编辑器打开 |
+| Tk | 主窗口上的「打开配置」按钮 |
+| 控制台版 | 直接编辑程序所在目录里的那个文件 |
+
+没有安装器也没有注册表：首次运行按内置默认值生成一份，**删掉它就会重新生成**。
+
+改动时的几条规矩：
+
+- **存盘后要重启程序。** 配置只在启动时读一次，没有热重载。
+- 键名照抄，只改等号右边：字符串带双引号（`language = "中文"`），布尔值小写
+  （`true` / `false`），整数不加引号（`max_list_len = 200`）。
+- 时间字段是带单位的字符串：`"500ms"`、`"2s"`、`"5m"`、`"1h"`。
+- 键名拼错会被当作未知项忽略；**但语法写错会让整体回退到默认值**，日志框里会写明
+  原因——改完没生效，先看日志。
+
+完整的一份长这样（磁盘上那份已带这些注释，照着改即可）：
+
+```toml
+# Elite Dangerous Journal Monitor - configuration
+#
+# Restart the program after editing. / 修改后重启程序生效。
+# Durations accept 30s / 5m / 1h. / 时间字段支持 30s / 5m / 1h 这类写法。
+# timezone: UTC+8 (default) | UTC | auto | UTC+5:30   (see tz.go)
+# enable_panel = false never opens a port; monitoring and push still run.
+#   为 false 时完全不监听端口，只运行监控与推送。
+# wxpusher: alerts go out through WxPusher (wxpusher.zjiecode.com), a
+#   third-party push service - not an official WeChat API. Fill in app_token
+#   and uid to enable alerts; leave both empty to monitor without push.
+#   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
+#   两者留空则只监控。凭据只留在本机，请勿外传。
+# language: 中文 | English   (restart to apply / 重启生效)
+#
+# Delete this file to regenerate it from the built-in defaults.
+# 删掉本文件会按内置默认值重新生成一份。
+listen_addr = ":8088"
+timezone = "UTC+8"
+enable_panel = true
+language = "中文"
+poll_interval = "2s"
+stall_threshold = "10m"
+stat_window = "1h"
+max_list_len = 200
+history_scan_count = 5
+
+[wxpusher]
+  url = "https://wxpusher.zjiecode.com/api/send/message"
+  app_token = ""
+  uid = ""
+```
+
+### 常见改动
+
+**换界面语言** —— `language = "English"`（`"中文"` / `"zh"` / `"en"` 都认）。
+
+**只让本机访问面板** —— `listen_addr = "127.0.0.1:8088"`。
+
+**彻底关掉网页面板** —— `enable_panel = false`：不再监听任何端口，监控与推送照常运行。
+
+**打开推送提醒** —— 到 [WxPusher](https://wxpusher.zjiecode.com) 注册，拿到应用令牌与
+用户 UID，填进 `[wxpusher]`：
+
+```toml
+[wxpusher]
+  url = "https://wxpusher.zjiecode.com/api/send/message"   # 保持默认
+  app_token = "AT_..."                                     # 应用令牌
+  uid = "UID_..."                                          # 用户 UID
+```
+
+两个值必须都填，推送才会启用。启动后日志框里会写明当前是哪种状态（`WxPusher：已启用` 或
+`WxPusher 推送：未配置 应用令牌 / 用户UID，推送已禁用`）；Win32 版的「运行状态」页签里
+另有一行 `WxPusher`。
+
+**调长静默告警的判定时间** —— 挂机时不想被频繁提醒，把 `stall_threshold` 从 `"10m"`
+改成 `"30m"` 或 `"1h"`。
+
+### 键一览
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
@@ -83,9 +161,9 @@ Journal 目录是自动定位的：
 | `stat_window` | `"1h"` | 「最近 N」统计所用的窗口 |
 | `max_list_len` | `200` | 单次接口调用最多返回的记录条数 |
 | `history_scan_count` | `5` | 舰船数据缺失时回溯的历史日志份数 |
-| `wxpusher.url` | WxPusher 接口 | 推送服务地址 |
-| `wxpusher.app_token` | — | 你的 WxPusher 应用令牌 |
-| `wxpusher.uid` | — | 你的 WxPusher 用户 UID |
+| `wxpusher.url` | WxPusher 接口 | 推送服务地址，一般不用改 |
+| `wxpusher.app_token` | — | 你的 WxPusher 应用令牌（留空 = 不推送） |
+| `wxpusher.uid` | — | 你的 WxPusher 用户 UID（留空 = 不推送） |
 
 ## 网页面板
 
@@ -174,7 +252,7 @@ src/                  Go 源码（单一 main 包）+ 内嵌前端
   ├─ icon/ app.manifest 程序图标与 Windows 视觉样式清单
   ├─ win32.go gui.go    Win32 界面      console.go  控制台入口
   └─ tk.go              Tk 界面
-tools/                开发期辅助脚本（make_icon.py、migrate_config.py）
+tools/                开发期辅助脚本（make_icon.py）
 build.sh              构建 / 检查 / upx / 清理
 ```
 
@@ -187,8 +265,8 @@ build.sh              构建 / 检查 / upx / 清理
 
 - **非官方项目。** 与 Frontier Developments 无隶属或背书关系。*Elite Dangerous* 是
   Frontier Developments plc 的商标。
-- 推送依赖 [WxPusher](https://wxpusher.zjiecode.com)——一个经微信服务号送达的第三方
-  服务，不是微信官方接口。
+- 推送走 [WxPusher](https://wxpusher.zjiecode.com)——第三方推送服务商，不是微信官方
+  接口。怎么送到你手上由它决定，通常是它微信服务号里的消息。
 - Journal 里的时间戳一律是 UTC，所有显示时间都经过配置的时区转换。
 
 ## 许可证

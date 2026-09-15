@@ -622,7 +622,7 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case wmClose:
-		// Closing the window is not quitting: monitoring and WeChat push keep running, so
+		// Closing the window is not quitting: monitoring and WxPusher push keep running, so
 		// collapse to the tray
 		app.hideToTray()
 		return 0
