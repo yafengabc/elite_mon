@@ -1,0 +1,97 @@
+name: Release
+
+# Pushing a v* tag builds every artifact and attaches them to a GitHub Release.
+# workflow_dispatch is there to rehearse the whole build on a branch without
+# tagging anything -- it runs check + build but skips the publish step.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# gh release create needs write access; the default token is read-only.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # One Windows runner is enough for everything: no variant needs CGO, so the
+    # two Linux binaries cross-compile straight from here. (Removing the IUP UI
+    # is what made this possible -- it was the only variant that needed gcc.)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both `git describe --tags` (the version stamp in build.sh) and the Go
+          # toolchain's own VCS stamping need the full history and the tags.
+          # A shallow clone silently degrades both to "dev".
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Show environment
+        shell: bash
+        run: |
+          go version
+          git --version
+          git describe --tags --always || echo "(no tag reachable)"
+
+      # Fail before producing artifacts if the code does not hold up. Note this
+      # also runs the tests; trend_realdata_test needs a real journal directory
+      # and skips itself here.
+      - name: Check (gofmt + vet + test, every variant)
+        shell: bash
+        run: ./build.sh check
+
+      - name: Build all artifacts
+        shell: bash
+        run: ./build.sh all
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd Release
+          sha256sum \
+            elite_mon.exe \
+            elite_mon_win32.exe \
+            elite_mon_tk.exe \
+            elite_mon_linux_amd64 \
+            elite_mon_tk_linux_amd64 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Also proves the version stamp reached the binary: the string is compiled
+      # into the exe as a literal, so a regression in build.sh shows up here.
+      # grep -a because the target is a binary (no `strings` in Git Bash).
+      - name: Verify the version stamp landed in the binaries
+        shell: bash
+        run: |
+          TAG="$(git describe --tags --always)"
+          echo "expecting: $TAG"
+          for exe in Release/elite_mon_win32.exe Release/elite_mon_tk.exe; do
+            if grep -qaF "$TAG" "$exe"; then
+              echo "  ok       $exe"
+            else
+              # A build with no git metadata legitimately has no stamp; say so
+              # rather than failing a release over it.
+              echo "  MISSING  $exe  (expected only if the build had no git metadata)"
+            fi
+          done
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            Release/elite_mon.exe \
+            Release/elite_mon_win32.exe \
+            Release/elite_mon_tk.exe \
+            Release/elite_mon_linux_amd64 \
+            Release/elite_mon_tk_linux_amd64 \
+            Release/SHA256SUMS.txt

@@ -1,0 +1,264 @@
+# Elite Dangerous Journal Monitor - language file: 简体中文 (zh)
+#
+# This file is read at startup, next to the program's lang/ directory. Edit it
+# and restart the program - there is nothing to recompile.
+#
+#   * The keys under [strings] are stable ids used by the code. Never rename or
+#     translate them; only change the text on the right of "=".
+#   * A value may contain {0}, {1}, ... which the program fills in. Keep every
+#     placeholder the original text had, and do not invent new ones.
+#   * Adding a language: copy this file to lang/<code>.toml, change code / names
+#     / tag below, translate the [strings] values, then put that code in
+#     config.toml's "language" field. Untranslated ids fall back to the built-in
+#     base language, so a half-done file is usable.
+#   * Deleting this file is harmless: the built-in copy is used again.
+#
+# 本文件在启动时读取（位于程序旁的 lang/ 目录）。改完重启程序即可生效，无需编译。
+#   * [strings] 下的 key 是代码使用的稳定 ID，不要改名或翻译，只改 "=" 右边的文案。
+#   * 文案里的 {0} {1} 是程序填的占位符；原有占位符要保留，不要自己新增。
+#   * 加一门语言：把本文件复制成 lang/<code>.toml，改下面的 code / names / tag，
+#     翻译 [strings] 的值，再把该 code 填进 config.toml 的 language 字段。
+#     没翻译的 ID 会回退到内置基础语言，所以翻一半也能用。
+#   * 删掉本文件不影响启动：会自动回退到内置的同一份文案。
+
+code  = "zh"
+tag   = "zh-CN"
+# config.toml 的 language 字段接受的写法（不区分大小写）
+# "language" values accepted in config.toml (case-insensitive)
+names = ["zh", "chinese", "中文"]
+
+# 日志行里出现这些词会被标红 / 标黄。必须匹配本语言日志的真实措辞。
+# Substrings that colour a log line red / yellow - must match what
+# this language's log lines really say.
+err_words  = [
+    "失败", "错误", "异常", "无法", "出错", "failed", "error", "exception",
+    "cannot", "unable",
+]
+warn_words = ["警告", "丢弃", "warning", "discard"]
+
+# config.toml 的 timezone 字段额外接受的写法 -> 归一化结果
+# Extra words accepted in config.toml's "timezone" -> canonical form
+[tz_words]
+"自动"     = "auto"
+"本机"     = "auto"
+"跟随本机" = "auto"
+"系统"     = "auto"
+"本地"     = "auto"
+"北京时间" = "beijing"
+"北京"     = "beijing"
+"游戏时间" = "utc"
+"ed时间"   = "utc"
+
+# ---- app / window   程序与窗口 ----
+[strings.app]
+init  = "初始化…"
+title = "精英危险 实时监控"
+
+# ---- tabs and page titles   页签与页面标题 ----
+[strings.tab]
+bounty         = "赏金日志"
+bounty_mission = "赏金日志（含任务赏金）"
+data           = "数据面板"
+events         = "事件消息"
+ship           = "舰船信息"
+status         = "运行状态"
+summary        = "统计汇总"
+
+# ---- about dialog   关于对话框 ----
+[strings.about]
+desc            = "Elite Dangerous 日志监控：统计击杀赏金、掉盾推送、网页面板。"
+enabled         = "已启用"
+lbl_config_file = "配置文件    {0}"
+lbl_journal_dir = "Journal 目录 {0}"
+lbl_listen_addr = "监听地址    {0}"
+lbl_version     = "版本        {0}"
+lbl_wx          = "微信推送    {0}"
+panel_url       = "网页面板   http://localhost{0}"
+params          = "运行参数    扫描间隔 {0}    静默告警 {1}    统计窗口 {2}"
+push_disabled   = "未配置 应用令牌 / 用户UID，推送已禁用"
+
+# ---- buttons, menus, dialogs   按钮、菜单、对话框 ----
+[strings.gui]
+cannot_open          = "打不开：\n{0}"
+clear_log_acc        = "清空日志窗口(&C)"
+close_exits          = "关闭窗口即退出程序"
+close_hint           = "窗口可关闭到托盘，监控与推送继续运行。"
+close_hint_tray      = "关闭窗口将最小化到托盘；右键托盘图标可退出"
+exit                 = "退出"
+exit_acc             = "退出(&X)"
+log_cleared          = "日志窗口已清空"
+menu_about           = "关于"
+menu_about_acc       = "关于(&A)"
+menu_file_acc        = "文件(&F)"
+menu_help_acc        = "帮助(&H)"
+menu_view_acc        = "视图(&V)"
+open_config          = "打开配置"
+open_config_file_acc = "打开配置文件(&C)"
+open_failed          = "打开失败"
+open_web             = "打开网页"
+open_web_panel_acc   = "打开网页面板(&W)"
+panel_disabled_msg   = "网页面板已按配置关闭（config.toml 的 enable_panel = false）。\n改回 true 并重启程序即可。"
+panel_disabled_title = "网页面板未启用"
+show_window_acc      = "显示主窗口(&O)"
+tray_tip             = "监控和微信推送仍在后台运行，双击托盘图标可重新打开窗口。"
+tray_unavailable     = "托盘图标不可用，关闭窗口即退出程序"
+
+# ---- status bar and status line   状态栏与状态行 ----
+[strings.status]
+current_log   = "当前日志 {0}"
+lan           = "局域网 {0}"
+lan_pad       = "     局域网 {0}"
+listening     = "监听 {0}"
+missions      = "任务 {0}/{1}"
+monitoring    = "监控运行中"
+panel_off     = "网页面板已关闭"
+prefix_error  = "[错误] {0}"
+prefix_warn   = "[警告] {0}"
+scan_interval = "扫描间隔 {0}"
+span_kills    = "最近 {0}击杀 {1}"
+total_bounty  = "总赏金 {0} Cr"
+total_kills   = "总击杀 {0}"
+updated       = "更新于 {0}"
+updated_dash  = "更新于 -"
+
+# ---- data panel summary   数据面板汇总 ----
+[strings.summary]
+missions         = "任务进度：已完成 {0} / 共 {1}（进行中 {2}）"
+missions_none    = "任务进度：暂无任务数据（未读到 Missions 事件）"
+ship_unavailable = "无法读取舰船信息"
+span_bounty      = "最近 {0}赏金：{1} Cr"
+span_kills       = "最近 {0}击杀：{1}"
+total_bounty     = "总赏金：{0} Cr"
+total_kills      = "总击杀：{0}"
+
+# ---- ship info   舰船信息 ----
+[strings.ship]
+cargo             = "货舱：{0} / {1}"
+in_fighter        = "● 当前在舰载机 / 地面车中"
+in_fighter_inline = "    ● 当前在舰载机 / 地面车中"
+main_fuel         = "主油箱：{0} 吨 / {1} 吨（{2}%）"
+name              = "船名：{0} / {1}"
+reserve_fuel      = "动力储备仓：{0} 吨"
+vessel            = "舰船：{0}"
+vessel_label      = "舰船："
+waiting           = "等待舰船数据..."
+
+# ---- event messages   事件消息 ----
+[strings.msg]
+cargo_scanned     = "被扫描货柜"
+fighter_deployed  = "部署舰载机"
+fighter_destroyed = "舰载机被摧毁"
+fighter_docked    = "舰载机已回收"
+kill_target       = "击杀目标：{0}"
+stall_paused      = "{0} | 📴 日志已暂停 {1} 没有新记录，可能游戏掉线了，请处理一下"
+
+# ---- bounty   赏金 ----
+[strings.bounty]
+kill_line      = "消灭罪犯: {0} | 获得赏金 {1} Cr"
+mission        = "任务赏金"
+shield_line    = "{0} | 🚨 护盾被击穿 | 舰船：{1}"
+unknown_ship   = "未知舰船"
+unknown_target = "未知目标"
+
+# ---- WeChat push / WxPusher   微信推送 ----
+[strings.wx]
+enabled          = "WxPusher：已启用"
+json_error       = "WxPusher JSON错误: {0}"
+not_configured   = "微信推送：未配置 应用令牌 / 用户UID，推送已禁用"
+parse_failed     = "WxPusher返回解析失败: {0}"
+push_ok          = "WxPusher推送成功: {0}"
+send_failed      = "WxPusher发送失败: {0}"
+send_failed_code = "WxPusher发送失败：code={0} msg={1}\n"
+shield_down      = "🚨 护盾被打掉\n时间：{0}\n舰船：{1}"
+shield_title     = "护盾告警"
+stall_body       = "📴 日志好像卡住了\n日志已经 {0} 没有新记录了，多半是游戏掉线了，麻烦抽空看一眼处理下～\n最后一条记录：{1}"
+stall_title      = "日志静默提醒"
+too_many         = "WxPusher 在途请求过多，丢弃本次推送: {0}"
+
+# ---- runtime logs   运行日志 ----
+[strings.log]
+cfg_default_created  = "已生成默认配置文件: {0}"
+cfg_parse_failed     = "配置文件解析失败，回退到默认配置: {0}"
+cfg_write_failed     = "无法写入配置文件，使用内置默认值: {0}"
+config_file          = "配置文件：{0}"
+gui_started          = "GUI 已启动，关闭窗口会最小化到托盘"
+journal_dir          = "Journal 目录：{0}"
+lang_dir_created     = "语言文件已生成到 {0}（改动后重启程序生效，无需重新编译）"
+lang_dir_failed      = "无法创建语言目录 {0}（{1}），将只使用内置文案"
+lang_file_missing    = "语言文件 {0} 不存在，正在使用内置文案（删掉整个 lang 目录可重新生成）"
+lang_missing_ids     = "语言文件 {0} 缺少 {1} 条文案，已用内置文案补齐"
+lang_parse_failed    = "语言文件解析失败，已改用内置文案: {0}（{1}）"
+lang_unknown_ids     = "语言文件 {0} 有 {1} 个未知条目（ID 或字段名可能拼错）"
+last_shield_drop     = "历史最新掉盾事件：{0}"
+minimized            = "已最小化到托盘"
+monitor_error        = "监控异常：{0}"
+monitor_panic        = "监控协程异常，本轮跳过: {0}"
+new_session          = "检测到新会话日志: {0}"
+new_shield_drop      = "🚨 发现新的护盾掉落事件: {0}"
+no_logfile           = "未找到日志文件"
+panel_addr           = "面板地址：http://localhost{0}"
+panel_i18n_failed    = "面板语言表返回失败: {0}"
+panel_off            = "网页面板：已按配置关闭（不监听端口）"
+panel_off_note       = "网页面板已按配置关闭：不监听端口，仅运行监控与微信推送"
+panel_start_failed   = "面板服务启动失败: {0}"
+scan_params          = "扫描间隔：{0} ｜ 静默告警：{1} ｜ 统计窗口：{2}"
+shield_ready         = "护盾事件监控初始化完成"
+ship_recovered       = "从历史日志补齐舰船数据: {0} (货舱 {1} / 油箱 {2})\n"
+stall_capped         = "⚠️ 日志静默提醒已达 {0} 次上限，后续不再推送（活动恢复后会重置）"
+stall_silent         = "⚠️ 日志已静默 {0}，推送提醒"
+tk_build_failed      = "[tk] 构建界面失败：{0}"
+tk_eval_init_failed  = "[tk] 初始化 eval 扩展失败：{0}"
+tk_open_failed       = "[tk] 打开失败：{0} {1}"
+tk_set_var           = "[tk] 设置变量 {0} 失败：{1}"
+tk_tcl_error         = "[tk] Tcl 错误：{0} ｜脚本：{1}"
+tk_update            = "[tk] 更新 {0} 失败：{1}"
+tray_reg_failed      = "托盘图标注册失败，关闭窗口将直接退出"
+tz_display           = "显示时区：{0}"
+tz_unknown           = "时区写法 {0} 无法识别，回退默认 UTC+8"
+version              = "版本：{0}"
+win_class_reg_failed = "窗口类注册失败"
+win_create_failed    = "窗口创建失败"
+
+# ---- timezone   时区 ----
+[strings.tz]
+auto_local = "自动（本机 {0}）"
+
+# ---- emoji text tags for the log box   日志框的 emoji 文字标记 ----
+[strings.tag]
+done   = "[完成]"
+shield = "[护盾]"
+silent = "[静默]"
+warn   = "[警告]"
+
+# ---- shared bits   通用片段 ----
+[strings.common]
+fighter        = "舰载机"
+mission_note   = "（含任务赏金 {0} Cr）"
+none           = "无"
+span_hours     = "{0} 小时"
+span_hours_min = "{0} 小时 {1} 分"
+span_min       = "{0} 分钟"
+span_sec       = "{0} 秒"
+stat_window_1h = "1 小时"
+unknown        = "未知"
+
+# ---- web panel   网页面板 ----
+[strings.panel]
+connect_failed = "⚠ 无法连接监控服务（{0}）"
+legend_10m     = "最近 10 分钟击杀"
+legend_1h      = "最近 1 小时击杀"
+loading        = "加载中..."
+log_file       = "当前日志文件：{0}"
+no_events      = "暂无事件消息"
+no_kill_log    = "暂无击杀日志"
+no_trend       = "暂无趋势数据"
+session        = "本局"
+span_bounty    = "最近 {0}赏金：{1}"
+tip            = "{0} ｜ 最近 10 分钟 {1} 杀 ｜ 最近 1 小时 {2} 杀 ｜ 赏金 {3} Cr"
+title          = "精英危险 实时监控面板"
+total_bounty   = "总赏金：{0}"
+trend_all      = "全程 {0}"
+trend_none     = "全程 {0} 没有击杀记录"
+trend_title    = "击杀趋势"
+updated_suffix = " ｜ 更新于 {0}"
+window_title   = "ED监控面板"
