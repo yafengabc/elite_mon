@@ -12,6 +12,9 @@ package main
 // the active one from /api/i18n, so each language is translated in exactly one
 // place.
 //
+// config.toml's "language" defaults to auto and follows the system locale (see
+// locale.go); naming a language there overrides it.
+//
 // Adding a language:
 //  1. copy lang/en.toml to lang/<code>.toml, beside the program;
 //  2. set code / names / tag in it - names are the values accepted in
@@ -78,31 +81,48 @@ func parseLang(s string) string {
 		return baseLang
 	}
 	for _, sp := range langs {
-		if sp.code == v {
+		if sp.code == v || hasName(sp, v) {
 			return sp.code
-		}
-		for _, n := range sp.names {
-			if n == v {
-				return sp.code
-			}
 		}
 	}
 	return baseLang
 }
 
-// applyLang applies the configured language.
-func applyLang() {
-	applyLangValue(cfg.Language)
+// applyLang applies the configured language and returns a message for an
+// automatic choice, or nil when the config named a language explicitly.
+func applyLang() pendingLog {
+	return applyLangValue(cfg.Language)
 }
 
-// applyLangValue sets the active language from a raw config value. Callers must
-// run after the language tables are registered (i.e. after init(), so any time
-// from main() onwards): config loading happens during package init and therefore
-// buffers its messages instead of translating them - see cfgNotices.
-func applyLangValue(lang string) {
-	if sp := langByCode[parseLang(lang)]; sp != nil {
+// applyLangValue sets the active language from a raw config value and returns
+// the message main() should log, if any.
+//
+// A value asking for auto - the default, and also an omitted key (see locale.go)
+// - is resolved against the system locale, and the outcome is reported back so
+// the log can show what it picked: on a machine whose locale nobody has
+// translated, "auto" silently landing on the base language is otherwise hard to
+// explain.
+//
+// Callers must run after the language tables are registered (i.e. after init(),
+// so any time from main() onwards): config loading happens during package init
+// and therefore buffers its messages instead of translating them - see
+// cfgNotices.
+func applyLangValue(lang string) pendingLog {
+	if !isAutoLang(lang) {
+		if sp := langByCode[parseLang(lang)]; sp != nil {
+			currentSpec.Store(sp)
+		}
+		return nil
+	}
+	locale := systemLocaleFn()
+	code := matchLocale(locale)
+	if sp := langByCode[code]; sp != nil {
 		currentSpec.Store(sp)
 	}
+	if locale == "" {
+		return nil // the machine named no locale: nothing worth reporting
+	}
+	return func() string { return T("log.lang_auto", code, locale) }
 }
 
 // langCode is the active language code for the web panel ("zh" / "en").

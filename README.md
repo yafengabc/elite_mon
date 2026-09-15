@@ -24,7 +24,7 @@ or while *not* playing:
 | **Alerts** | Shield drop and log silence, pushed through [WxPusher](https://wxpusher.zjiecode.com) — a third-party push service, not an official WeChat API. Repeated silence alerts are capped so an overnight disconnect cannot spam you |
 | **Ship info** | Current ship, name/ID, cargo, main and reserve fuel — recovered from older journals when the current one has no `Loadout` event yet |
 | **Web panel** | Live status, trend chart (inline SVG), bounty log, event stream. Served over the LAN, gzip-compressed, no build step, no CDN |
-| **Bilingual UI** | 中文 / English, switchable in the config. Translations live in editable TOML files — adding a language needs no recompilation |
+| **Bilingual UI** | 中文 / English, picked from the system locale by default and overridable in the config. Translations live in editable TOML files — adding a language needs no recompilation |
 | **Self-contained** | Single executable. No installer, no runtime, no DLLs, **no CGO** — the Tk build embeds Tcl/Tk 9.0 as pure Go |
 | **Editable config** | Plain TOML next to the executable, with the defaults documented inline |
 
@@ -112,14 +112,15 @@ just edit the values):
 #   and uid to enable alerts; leave both empty to monitor without push.
 #   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
 #   两者留空则只监控。凭据只留在本机，请勿外传。
-# language: 中文 | English   (restart to apply / 重启生效)
+# language: auto (default, follows the system) | 中文 | English
+#   默认 auto：按系统区域自动切换界面语言；重启生效 (restart to apply)
 #
 # Delete this file to regenerate it from the built-in defaults.
 # 删掉本文件会按内置默认值重新生成一份。
 listen_addr = ":8088"
 timezone = "UTC+8"
 enable_panel = true
-language = "中文"
+language = "auto"
 poll_interval = "2s"
 stall_threshold = "10m"
 stat_window = "1h"
@@ -134,8 +135,10 @@ history_scan_count = 5
 
 ### Common edits
 
-**Switch the UI language** — `language = "English"` (`"中文"` / `"zh"` / `"en"` are all
-accepted).
+**Switch the UI language** — the default is `language = "auto"`, which follows the
+system locale (`zh-CN` → Chinese, `en-US` → English; any language whose
+`lang/<code>.toml` claims that locale wins). Pin it with `"English"` / `"中文"` /
+`"en"` if auto guesses wrong — the startup log reports what auto picked.
 
 **Keep the panel off the LAN** — `listen_addr = "127.0.0.1:8088"`.
 
@@ -166,7 +169,7 @@ long AFK session, raise it to `"30m"` or `"1h"`.
 | `listen_addr` | `":8088"` | Panel listen address. Use `"127.0.0.1:8088"` to keep it off the LAN |
 | `timezone` | `"UTC+8"` | Display timezone. Accepts `UTC+8`, `UTC`, `auto`, `UTC+5:30`, `北京时间` |
 | `enable_panel` | `true` | `false` never opens a port — monitoring and push still run |
-| `language` | `"中文"` | `中文` or `English` |
+| `language` | `"auto"` | `auto` follows the system locale; `中文` / `English` (`zh` / `en`) pin it |
 | `poll_interval` | `"2s"` | How often the journal is re-read |
 | `stall_threshold` | `"10m"` | Push an alert once the journal has been silent this long |
 | `stat_window` | `"1h"` | Window used for the "last N" statistics |
@@ -224,8 +227,10 @@ title = "ED Real-time Monitor Panel"
 ```
 
 To add a language, copy `lang/en.toml` to `lang/ja.toml`, set `code` / `tag` / `names`,
-translate the `[strings]` tables, and put `language = "ja"` in `config.toml`. Any id you
-leave out falls back to the base language, so a half-finished translation still works.
+and translate the `[strings]` tables. A Japanese machine then picks it up on its own:/nauto matches the system locale against every language's `tag`, so shipping
+`lang/ja.toml` is enough. Put `language = "ja"` in `config.toml` only to force it
+somewhere else. Any id you leave out falls back to the base language, so a
+half-finished translation still works.
 Two extra fields control how log lines are coloured:
 
 ```toml

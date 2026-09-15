@@ -22,7 +22,7 @@
 | **告警** | 掉盾与日志静默，经 [WxPusher](https://wxpusher.zjiecode.com) 推送提醒——第三方推送服务，非微信官方接口。静默提醒有次数上限，整夜掉线不会持续刷屏 |
 | **舰船信息** | 当前舰船、船名/编号、货舱、主油箱与储备仓——当前日志还没有 `Loadout` 事件时，会从历史日志补齐 |
 | **网页面板** | 实时状态、趋势图（内联 SVG）、赏金日志、事件流。局域网可访问、gzip 压缩、无构建步骤、不依赖 CDN |
-| **中英双语界面** | 配置里切换。翻译放在可编辑的 TOML 文件里，加一门语言**不需要重新编译** |
+| **中英双语界面** | 默认跟随系统区域自动切换，也可在配置里写死。翻译放在可编辑的 TOML 文件里，加一门语言**不需要重新编译** |
 | **自包含** | 单文件可执行程序。无需安装器、无运行时依赖、无 DLL、**无 CGO**——Tk 版把 Tcl/Tk 9.0 以纯 Go 形式内嵌 |
 | **配置可编辑** | 程序旁的纯 TOML 文件，默认值与说明就写在文件里 |
 
@@ -103,14 +103,15 @@ Journal 目录是自动定位的：
 #   and uid to enable alerts; leave both empty to monitor without push.
 #   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
 #   两者留空则只监控。凭据只留在本机，请勿外传。
-# language: 中文 | English   (restart to apply / 重启生效)
+# language: auto (default, follows the system) | 中文 | English
+#   默认 auto：按系统区域自动切换界面语言；重启生效 (restart to apply)
 #
 # Delete this file to regenerate it from the built-in defaults.
 # 删掉本文件会按内置默认值重新生成一份。
 listen_addr = ":8088"
 timezone = "UTC+8"
 enable_panel = true
-language = "中文"
+language = "auto"
 poll_interval = "2s"
 stall_threshold = "10m"
 stat_window = "1h"
@@ -125,7 +126,9 @@ history_scan_count = 5
 
 ### 常见改动
 
-**换界面语言** —— `language = "English"`（`"中文"` / `"zh"` / `"en"` 都认）。
+**换界面语言** —— 默认 `language = "auto"`，按系统区域自动切换（`zh-CN` → 中文，
+`en-US` → English；哪个 `lang/<code>.toml` 认领了该系统区域就用哪个）。自动认错了
+就写死：`"English"` / `"中文"` / `"en"` / `"zh"`。启动日志会写明 auto 挑中了哪个。
 
 **只让本机访问面板** —— `listen_addr = "127.0.0.1:8088"`。
 
@@ -155,7 +158,7 @@ history_scan_count = 5
 | `listen_addr` | `":8088"` | 面板监听地址。填 `"127.0.0.1:8088"` 可只允许本机访问 |
 | `timezone` | `"UTC+8"` | 显示时区。支持 `UTC+8`、`UTC`、`auto`、`UTC+5:30`、`北京时间` |
 | `enable_panel` | `true` | 为 `false` 时完全不监听端口——监控与推送照常运行 |
-| `language` | `"中文"` | `中文` 或 `English` |
+| `language` | `"auto"` | `auto` 跟随系统区域；写 `中文` / `English`（`zh` / `en`）则固定 |
 | `poll_interval` | `"2s"` | 重新读取日志的间隔 |
 | `stall_threshold` | `"10m"` | 日志静默多久后推送提醒 |
 | `stat_window` | `"1h"` | 「最近 N」统计所用的窗口 |
@@ -209,8 +212,10 @@ title = "精英危险 实时监控面板"
 ```
 
 要加一门语言：把 `lang/en.toml` 复制成 `lang/ja.toml`，改 `code` / `tag` / `names`，
-翻译 `[strings]` 各表，再把 `config.toml` 里的 `language` 改成 `"ja"`。没翻到的 ID 会
-回退到基础语言，所以翻一半也能用。另有两个字段决定日志行的着色：
+翻译 `[strings]` 各表即可——日文系统的机器会自动用上它（auto 拿系统区域去比对每个
+语言的 `tag`，有 `lang/ja.toml` 就够了）。只有想在别的机器上强制日文，才需要把
+`config.toml` 里的 `language` 改成 `"ja"`。没翻到的 ID 会回退到基础语言，所以翻一半
+也能用。另有两个字段决定日志行的着色：
 
 ```toml
 err_words  = ["失败", "错误"]   # 含这些词的行显示为红色
