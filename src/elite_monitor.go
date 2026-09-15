@@ -130,7 +130,8 @@ type Config struct {
 	// monitoring and WxPusher push only.
 	EnablePanel bool `toml:"enable_panel"`
 
-	// UI language: 中文 / English. Takes effect after restart (see i18n.go).
+	// UI language. auto (the default) follows the system locale; 中文 / English
+	// pin it. Takes effect after restart (see i18n.go and locale.go).
 	Language string `toml:"language"`
 
 	PollInterval     string `toml:"poll_interval"`      // e.g. "2s"
@@ -161,7 +162,7 @@ func defaultConfig() Config {
 	c := Config{
 		ListenAddr:       defaultListenAddr,
 		TimeZone:         "UTC+8",
-		Language:         "中文",
+		Language:         "auto",
 		EnablePanel:      true,
 		PollInterval:     "2s",
 		StallThreshold:   "10m",
@@ -285,7 +286,8 @@ const configHeader = `# Elite Dangerous Journal Monitor - configuration
 #   and uid to enable alerts; leave both empty to monitor without push.
 #   推送走第三方服务 WxPusher（非微信官方接口）；填 app_token + uid 才会推送，
 #   两者留空则只监控。凭据只留在本机，请勿外传。
-# language: 中文 | English   (restart to apply / 重启生效)
+# language: auto (default, follows the system) | 中文 | English
+#   默认 auto：按系统区域自动切换界面语言；重启生效 (restart to apply)
 #
 # Delete this file to regenerate it from the built-in defaults.
 # 删掉本文件会按内置默认值重新生成一份。
@@ -1767,10 +1769,17 @@ func main() {
 	// config-load and language-file messages buffered during package init (see
 	// cfgNotices / langNotices). Language is fixed for the process lifetime -
 	// config.toml requires a restart, it does not change at runtime.
-	applyLang()
+	//
+	// The configured value is often auto, which resolves against the system
+	// locale right here; langNotice reports what it picked so a machine whose
+	// locale is not translated can be told apart from a broken config.
+	langNotice := applyLang()
 
 	log.Println("Elite Dangerous Journal Monitor")
 	log.Println(T("log.version", versionInfo()))
+	if langNotice != nil {
+		log.Println(langNotice())
+	}
 	for _, notice := range cfgNotices {
 		log.Println(notice())
 	}
