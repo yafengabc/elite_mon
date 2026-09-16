@@ -316,7 +316,7 @@ func runTk() {
 				`-message "` + T("gui.panel_disabled_msg") + `"`)
 			return
 		}
-		tkOpen("http://localhost" + cfg.ListenAddr)
+		tkOpen("http://localhost" + portOf(cfg.ListenAddr))
 	}))
 	btnExit := btns.TButton(Txt(T("gui.exit")), Command(func() { os.Exit(0) }))
 	Grid(btnCfg, In(btns), Row(0), Column(0), Padx(6))
@@ -353,7 +353,7 @@ func runTk() {
 // Tk event loop.
 func runUI() {
 	if cfg.EnablePanel {
-		log.Println(T("log.panel_addr", cfg.ListenAddr))
+		log.Println(T("log.panel_addr", portOf(cfg.ListenAddr)))
 
 		go func() {
 			if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {

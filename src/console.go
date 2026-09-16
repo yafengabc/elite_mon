@@ -48,6 +48,9 @@ func runUI() {
 		select {} // monitoring and push run in their own goroutines; main sleeps here
 	}
 
-	log.Println(T("log.panel_addr", cfg.ListenAddr))
-	log.Fatalln(T("log.panel_start_failed"), http.ListenAndServe(cfg.ListenAddr, nil))
+	log.Println(T("log.panel_addr", portOf(cfg.ListenAddr)))
+	// The {0} placeholder has to be filled here: T() leaves it verbatim when the
+	// argument is missing, so passing the error to log.Fatalln separately would
+	// print "failed to start: {0} <err>".
+	log.Fatalln(T("log.panel_start_failed", http.ListenAndServe(cfg.ListenAddr, nil)))
 }
