@@ -173,8 +173,8 @@ func TestKillTrendEndsAtNow(t *testing.T) {
 	}
 }
 
-// The right axis is a rolling window: each point = kills in the last hour up to the end
-// of that bucket, with the last bucket clipped to "now". The rightmost value must
+// The hour-average curve is a rolling window: each point = kills in the last hour up to
+// the end of that bucket, with the last bucket clipped to "now". The rightmost value must
 // therefore equal the stats panel's "kills in the last hour".
 func TestKillTrendRolling(t *testing.T) {
 	kill := func(hour, min int) bountyEvent {
@@ -213,7 +213,7 @@ func TestKillTrendRolling(t *testing.T) {
 		t.Errorf("末点应与统计窗口一致：面板 %d，曲线 %d", stat, pts[len(pts)-1].KillsHour)
 	}
 
-	// The left axis rolls too: the last point = kills in [now-10min, now); only the 01:55 entry here
+	// The rate curve rolls too: the last point = kills in [now-10min, now); only the 01:55 entry here
 	if pts[len(pts)-1].Kills != 1 {
 		t.Errorf("末点最近 10 分钟击杀应为 1，实际 %d（全部：%v）", pts[len(pts)-1].Kills, pts)
 	}

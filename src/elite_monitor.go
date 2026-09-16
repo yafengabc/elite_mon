@@ -66,10 +66,14 @@ const (
 	// the last kill of the current journal. The point cap is just a safety net
 	// (unreachable in a normal login); when exceeded, the oldest points are
 	// dropped to keep the recent stretch.
+	//
+	// The chart plots kills per hour, so the panel extrapolates a cell's own
+	// count by 6 (TREND_CELLS_PER_HOUR in static/main.js): change the bucket and
+	// that factor has to follow, or the two curves stop sharing a scale.
 	trendBucket    = 10 * time.Minute
 	maxTrendPoints = 720 // 720 × 10 min = 120 hours
 
-	// Rolling window for the right-hand axis, matching the panel's
+	// Rolling window for the hour-average curve, matching the panel's
 	// "last hour kills". Deliberately not tied to the configurable stats
 	// window: changing that would change what the curve means, making
 	// plotted history incomparable.
@@ -367,9 +371,9 @@ type BountyItem struct {
 // TrendPoint is one point on the trend chart: kills and kill bounty in one cell.
 type TrendPoint struct {
 	TimeLocal string `json:"time_local"` // cell start, HH:MM
-	Kills     int    `json:"kills"`
+	Kills     int    `json:"kills"`      // kills in this cell; the panel plots it as a rate
 	Bounty    int64  `json:"bounty"`     // kill bounty in this cell; not plotted, shown only in tooltips
-	KillsHour int    `json:"kills_hour"` // kills in the 1-hour block containing this cell; plotted on the right axis
+	KillsHour int    `json:"kills_hour"` // kills in the 1-hour block containing this cell; plotted
 }
 
 type ShipData struct {
@@ -814,13 +818,14 @@ func (m *monitor) killTrend(now time.Time) ([]TrendPoint, string) {
 	return points, spanText(end.Add(trendBucket).Sub(start))
 }
 
-// fillWindows fills the left axis (10 min) and right axis (1 h) kill counts
-// using rolling windows. Every window is [cell end - span, cell end): a normal
-// cell is exactly itself, and the last cell is still running, so its end is
-// clamped to "now" and the final point reads "last N minutes up to this
-// moment" instead of dropping to 0 at every ten-minute mark and climbing back.
-// The right axis matches the panel's "last hour kills" — its rightmost value is
-// the number shown on the panel.
+// fillWindows fills the two trend curves using rolling windows: the count inside
+// the cell itself (Kills, which the panel extrapolates to a kill rate) and the
+// count inside the rolling hour (KillsHour). Every window is
+// [cell end - span, cell end): a normal cell is exactly itself, and the last cell
+// is still running, so its end is clamped to "now" and the final point reads
+// "last N minutes up to this moment" instead of dropping to 0 at every
+// ten-minute mark and climbing back. The hour curve matches the panel's "last
+// hour kills" — its rightmost value is the number shown on the panel.
 func (m *monitor) fillWindows(now, start time.Time, points []TrendPoint) {
 	bs, n := m.bounties, len(m.bounties)
 
@@ -853,9 +858,9 @@ func (m *monitor) fillWindows(now, start time.Time, points []TrendPoint) {
 			if b.mission { // mission rewards count credits not kills: neither line should move
 				continue
 			}
-			hour++ // right axis: last hour
+			hour++ // hour-average curve: last hour
 			if !b.t.Before(cut10) {
-				k++ // left axis: this cell itself
+				k++ // rate curve: this cell itself
 				cr += b.credits
 			}
 		}

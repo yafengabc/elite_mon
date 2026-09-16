@@ -8,7 +8,7 @@ function esc(s){
 // ------------------------------------------------------------------
 // i18n: the panel keeps no translation of its own. The whole table is fetched
 // once from /api/i18n, which returns the active language overlaid on the base
-// one - so a new language is added in the Go tables alone (i18n_<code>.go).
+// one - so a new language is a new src/lang/<code>.toml and nothing else.
 // T() looks an id up and substitutes {0}, {1}, ...; the Go side uses the very
 // same templates, which keeps both surfaces worded identically.
 // ------------------------------------------------------------------
@@ -62,21 +62,11 @@ function clearPanels(){
 // Kill-trend chart: hand-drawn SVG, no external chart library (the panel must open offline).
 // ------------------------------------------------------------------
 
-// Round the Y-axis max to 1/2/2.5/5/10 x 10^n so ticks avoid values like 37.
-function niceMax(v){
-    if(v <= 0){ return 1; }
-    const mag = Math.pow(10, Math.floor(Math.log10(v)));
-    const n = v / mag;
-    const s = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
-    return s * mag;
-}
-
-// Abbreviate right-axis bounty ticks; full numbers like 1,000,000 squeeze out the chart.
-function shortCredits(v){
-    if(v >= 1000000){ return (v / 1000000).toFixed(v >= 10000000 ? 0 : 1) + "M"; }
-    if(v >= 1000){ return Math.round(v / 1000) + "k"; }
-    return String(Math.round(v));
-}
+// The chart plots kill rate, i.e. kills per hour. One trend point is one bucket
+// (10 min in Go - trendBucket in elite_monitor.go - which also decides the
+// timespan above the chart), so a cell's own count needs this factor to reach the
+// same unit as the rolling hour count the backend sends. Keep the two in step.
+const TREND_CELLS_PER_HOUR = 6;
 
 function renderTrend(pts, winText){
     const el = document.getElementById("trend");
@@ -86,35 +76,44 @@ function renderTrend(pts, winText){
         return;
     }
 
-    let maxK = 0, maxB = 0;
+    // One shared axis, in kills per hour: the rolling hour count already is one,
+    // and a cell's own count is extrapolated to it. Both curves then live on the
+    // same scale, so the taller line is genuinely the busier one.
+    const rate = function(p){ return Number(p.kills) * TREND_CELLS_PER_HOUR; };
+    let maxR = 0;
     pts.forEach(function(p){
-        if(Number(p.kills) > maxK){ maxK = Number(p.kills); }
-        if(Number(p.kills_hour) > maxB){ maxB = Number(p.kills_hour); }
+        const r = rate(p), h = Number(p.kills_hour);
+        if(r > maxR){ maxR = r; }
+        if(h > maxR){ maxR = h; }
     });
-    if(maxK === 0 && maxB === 0){
+    if(maxR === 0){
         setHTML("trend", "<div class='line'>" + T("panel.trend_none", esc(winText || T("panel.session"))) + "</div>");
         return;
     }
-    // Kills are integers and the Y axis is quartered, so the max must divide by 4.
-    maxK = Math.max(4, Math.ceil(maxK / 4) * 4);
-    maxB = Math.max(4, Math.ceil(maxB / 4) * 4);
+    // A quartered axis needs a max that divides by 4; rates are whole numbers, so
+    // every tick label stays whole too.
+    maxR = Math.max(4, Math.ceil(maxR / 4) * 4);
 
-    const W = 940, H = 220, L = 46, R = 68, T0 = 16, B = 30;
+    // The tick column sits on the right, so R reserves room for the labels and L
+    // is only breathing space before the oldest point.
+    const W = 940, H = 220, L = 34, R = 54, T0 = 20, B = 30;
     const iw = W - L - R, ih = H - T0 - B;
     const n = pts.length;
     const step = n > 1 ? iw / (n - 1) : 0;
     const X = function(i){ return n > 1 ? L + step * i : L + iw / 2; };
-    const Y = function(v, max){ return T0 + ih - ih * (v / max); };
+    const Y = function(v){ return T0 + ih - ih * (v / maxR); };
 
     let g = "";
 
-    // Horizontal grid plus left (kills) and right (bounty) tick labels
+    // Horizontal grid plus a single tick column on the right: both series share it
+    const axisX = L + iw;
     for(let i = 0; i <= 4; i++){
         const y = T0 + ih * i / 4;
-        g += '<line x1="' + L + '" y1="' + y + '" x2="' + (L + iw) + '" y2="' + y + '" stroke="#2a2a3a" stroke-width="1"/>';
-        g += '<text x="' + (L - 8) + '" y="' + (y + 4) + '" fill="#6a6a7a" font-size="11" text-anchor="end">' + Math.round(maxK * (4 - i) / 4) + '</text>';
-        g += '<text x="' + (L + iw + 8) + '" y="' + (y + 4) + '" fill="#6a6a7a" font-size="11" text-anchor="start">' + Math.round(maxB * (4 - i) / 4) + '</text>';
+        g += '<line x1="' + L + '" y1="' + y + '" x2="' + axisX + '" y2="' + y + '" stroke="#2a2a3a" stroke-width="1"/>';
+        g += '<text x="' + (axisX + 8) + '" y="' + (y + 4) + '" fill="#6a6a7a" font-size="11" text-anchor="start">' + Math.round(maxR * (4 - i) / 4) + '</text>';
     }
+    // Unit for those bare tick numbers
+    g += '<text x="' + (axisX + 8) + '" y="' + (T0 - 8) + '" fill="#6a6a7a" font-size="10" text-anchor="start">' + esc(T("panel.axis_rate")) + '</text>';
 
     // Time labels: thin out to about 8; labelling every point is unreadable
     const labelEvery = Math.max(1, Math.ceil(n / 8));
@@ -125,19 +124,20 @@ function renderTrend(pts, winText){
     // Hover targets: one transparent rect per column, showing that column's numbers on hover
     const colW = n > 1 ? step : iw;
     for(let i = 0; i < n; i++){
-        const tip = T("panel.tip", pts[i].time_local, pts[i].kills,
-            Number(pts[i].kills_hour), Number(pts[i].bounty).toLocaleString());
+        const tip = T("panel.tip", pts[i].time_local, rate(pts[i]),
+            Number(pts[i].kills), Number(pts[i].kills_hour), Number(pts[i].bounty).toLocaleString());
         g += '<rect x="' + (X(i) - colW / 2).toFixed(1) + '" y="' + T0 + '" width="' + colW.toFixed(1) + '" height="' + ih + '" fill="transparent"><title>' + esc(tip) + '</title></rect>';
     }
 
-    // Two series: 1 h kills (blue, right axis) drawn first, 10 min kills (green, left axis) on top
-    let pk = "", pb = "";
+    // Two series on the shared axis: hour-average (blue) drawn first, the recent
+    // activity rate (green) on top
+    let pr = "", ph = "";
     pts.forEach(function(p, i){
-        pk += (i ? " " : "") + X(i).toFixed(1) + "," + Y(Number(p.kills), maxK).toFixed(1);
-        pb += (i ? " " : "") + X(i).toFixed(1) + "," + Y(Number(p.kills_hour), maxB).toFixed(1);
+        pr += (i ? " " : "") + X(i).toFixed(1) + "," + Y(rate(p)).toFixed(1);
+        ph += (i ? " " : "") + X(i).toFixed(1) + "," + Y(Number(p.kills_hour)).toFixed(1);
     });
-    g += '<polyline points="' + pb + '" fill="none" stroke="#4cf" stroke-width="2" stroke-linejoin="round"/>';
-    g += '<polyline points="' + pk + '" fill="none" stroke="#6f8" stroke-width="2" stroke-linejoin="round"/>';
+    g += '<polyline points="' + ph + '" fill="none" stroke="#4cf" stroke-width="2" stroke-linejoin="round"/>';
+    g += '<polyline points="' + pr + '" fill="none" stroke="#6f8" stroke-width="2" stroke-linejoin="round"/>';
 
     const legend = '<div class="tlegend">'
         + '<span class="k">■ ' + T("panel.legend_10m") + '</span>'

@@ -20,7 +20,7 @@ or while *not* playing:
 
 | | |
 |---|---|
-| **Statistics** | Total kills and bounty, "last N" windows, per-kill bounty log, mission reward breakdown, kill-trend chart (last 10 min / last 1 h), session totals |
+| **Statistics** | Total kills and bounty, "last N" windows, per-kill bounty log, mission reward breakdown, kill-trend chart (recent kill rate and the last hour, both in kills per hour), session totals |
 | **Alerts** | Shield drop and log silence, pushed through [WxPusher](https://wxpusher.zjiecode.com) — a third-party push service, not an official WeChat API. Repeated silence alerts are capped so an overnight disconnect cannot spam you |
 | **Ship info** | Current ship, name/ID, cargo, main and reserve fuel — recovered from older journals when the current one has no `Loadout` event yet |
 | **Web panel** | Live status, trend chart (inline SVG), bounty log, event stream. Served over the LAN, gzip-compressed, no build step, no CDN |
