@@ -141,13 +141,6 @@ func buildShip(st AppStatus) string {
 // ------------------------------------------------------------------
 
 // portOf extracts the port part (including the colon) from ":8088" / "0.0.0.0:8088".
-func portOf(addr string) string {
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		return addr[i:]
-	}
-	return addr
-}
-
 // lanURL guesses a LAN-reachable address so a phone can open the web panel directly.
 func lanURL() string {
 	addrs, err := net.InterfaceAddrs()

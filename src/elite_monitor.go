@@ -314,6 +314,20 @@ func parseDuration(s string, def time.Duration) time.Duration {
 	return def
 }
 
+// portOf returns the ":port" part of a listen address. The "http://localhost{0}"
+// templates expect exactly that: the config holds a bind address, not a URL for a
+// browser, so gluing it onto "localhost" printed "http://localhost127.0.0.1:8088"
+// for the LAN-off setting the README recommends.
+//
+// It lives here rather than in guicommon.go because the console build carries no
+// gui tag and needs it too.
+func portOf(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i:]
+	}
+	return addr
+}
+
 // ------------------------------------------------------------------
 // API response types
 // ------------------------------------------------------------------

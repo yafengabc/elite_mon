@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -405,6 +406,157 @@ func TestNoTranslatedStringFrozenAtInit(t *testing.T) {
 		t.Errorf("T() is evaluated during package init and will return raw ids:\n  %s",
 			strings.Join(bad, "\n  "))
 	}
+}
+
+// A call site must fill every placeholder its template asks for. T() leaves an
+// unfilled {n} verbatim on purpose (a visible placeholder beats a silently wrong
+// sentence), so a forgotten argument ships a literal "{0}" to the user. That is
+// exactly what console.go did:
+//
+//	log.Fatalln(T("log.panel_start_failed"), err) // err never reached T
+//
+// which printed "面板服务启动失败: {0} listen tcp ...". Like the test above this
+// is a source scan, so it also covers the files excluded by the current build
+// tags, and it works on whole files because a call may span several lines.
+func TestEveryCallSiteFillsItsPlaceholders(t *testing.T) {
+	base := baseTable()
+	if base == nil {
+		t.Fatal("base language table is not registered")
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("cannot list package sources: %v", err)
+	}
+
+	call := regexp.MustCompile(`(?:^|[^A-Za-z0-9_])T\(\s*"([^"]*)"`)
+	ph := regexp.MustCompile(`\{(\d+)\}`)
+
+	var bad []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src := stripComments(string(data))
+		for _, loc := range call.FindAllStringSubmatchIndex(src, -1) {
+			id := src[loc[2]:loc[3]]
+			want, known := base[id]
+			if !known {
+				continue // reported by the id-coverage checks
+			}
+			need := 0
+			for _, m := range ph.FindAllStringSubmatch(want, -1) {
+				if n, err := strconv.Atoi(m[1]); err == nil && n+1 > need {
+					need = n + 1
+				}
+			}
+			if got := countCallArgs(src, loc[1]); got < need {
+				line := 1 + strings.Count(src[:loc[0]], "\n")
+				bad = append(bad, fmt.Sprintf("%s:%d: T(%q) passes %d argument(s), %s needs %d",
+					f, line, id, got, baseLang, need))
+			}
+		}
+	}
+	if len(bad) > 0 {
+		t.Errorf("call sites that would print a literal {n}:\n  %s", strings.Join(bad, "\n  "))
+	}
+}
+
+// countCallArgs counts the top-level arguments of the call whose id literal ends
+// at i, stopping at the parenthesis that closes it. Nested parentheses, index
+// expressions and composite literals all belong to one argument, and a comma
+// inside a string literal is not a separator.
+func countCallArgs(src string, i int) int {
+	i = skipSpace(src, i)
+	if i < len(src) && src[i] == ',' { // separates the id from the first argument
+		i++
+	}
+	depth, commas, hasArg := 0, 0, false
+	for i < len(src) {
+		c := src[i]
+		switch {
+		case c == '"' || c == '\'' || c == '`':
+			i, hasArg = skipLiteral(src, i), true
+			continue
+		case c == '(' || c == '[' || c == '{':
+			depth, hasArg = depth+1, true
+		case c == ')' || c == ']' || c == '}':
+			if depth == 0 {
+				return argCount(commas, hasArg)
+			}
+			depth--
+		case c == ',' && depth == 0:
+			commas++
+		case c != ' ' && c != '\t' && c != '\r' && c != '\n':
+			hasArg = true
+		}
+		i++
+	}
+	return argCount(commas, hasArg)
+}
+
+func argCount(commas int, hasArg bool) int {
+	if !hasArg {
+		return 0
+	}
+	return commas + 1
+}
+
+func skipSpace(src string, i int) int {
+	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
+		i++
+	}
+	return i
+}
+
+// skipLiteral returns the offset just past the string or rune literal at i.
+func skipLiteral(src string, i int) int {
+	quote := src[i]
+	for i++; i < len(src); i++ {
+		if src[i] == '\\' && quote != '`' {
+			i++
+			continue
+		}
+		if src[i] == quote {
+			return i + 1
+		}
+	}
+	return i
+}
+
+// stripComments blanks out every comment, keeping offsets and line breaks so a
+// reported line number still matches the file on disk. Literals are skipped, so
+// a "//" inside a URL and a /* in a backtick block stay as they are.
+func stripComments(src string) string {
+	out := []byte(src)
+	for i := 0; i < len(out); {
+		switch c := out[i]; {
+		case c == '"' || c == '\'' || c == '`':
+			i = skipLiteral(string(out), i)
+		case c == '/' && i+1 < len(out) && out[i+1] == '/':
+			for ; i < len(out) && out[i] != '\n'; i++ {
+				out[i] = ' '
+			}
+		case c == '/' && i+1 < len(out) && out[i+1] == '*':
+			out[i], out[i+1] = ' ', ' '
+			for i += 2; i < len(out); i++ {
+				if out[i] == '*' && i+1 < len(out) && out[i+1] == '/' {
+					out[i], out[i+1] = ' ', ' '
+					i += 2
+					break
+				}
+				if out[i] != '\n' {
+					out[i] = ' '
+				}
+			}
+		default:
+			i++
+		}
+	}
+	return string(out)
 }
 
 // --- helpers ----------------------------------------------------------------
