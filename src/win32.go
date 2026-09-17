@@ -76,12 +76,16 @@ var (
 )
 
 var (
-	pCreateFontW     = gdi32.NewProc("CreateFontW")
-	pSelectObject    = gdi32.NewProc("SelectObject")
-	pDeleteObject    = gdi32.NewProc("DeleteObject")
-	pSetTextColor    = gdi32.NewProc("SetTextColor")
-	pSetBkMode       = gdi32.NewProc("SetBkMode")
-	pGetTextMetricsW = gdi32.NewProc("GetTextMetricsW")
+	pCreateFontW            = gdi32.NewProc("CreateFontW")
+	pSelectObject           = gdi32.NewProc("SelectObject")
+	pDeleteObject           = gdi32.NewProc("DeleteObject")
+	pSetTextColor           = gdi32.NewProc("SetTextColor")
+	pSetBkMode              = gdi32.NewProc("SetBkMode")
+	pGetTextMetricsW        = gdi32.NewProc("GetTextMetricsW")
+	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+	pBitBlt                 = gdi32.NewProc("BitBlt")
+	pDeleteDC               = gdi32.NewProc("DeleteDC")
 )
 
 var pInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
@@ -174,6 +178,8 @@ const (
 	bfBottom   = 0x0008
 
 	transparent = 1
+
+	srccopy = 0x00CC0020 // BitBlt raster op: copy source rectangle straight to destination
 
 	colorWindow        = 5
 	colorWindowText    = 8
@@ -677,6 +683,34 @@ func selectObject(hdc, obj syscall.Handle) syscall.Handle {
 
 func deleteObject(obj syscall.Handle) {
 	pDeleteObject.Call(uintptr(obj))
+}
+
+// createCompatibleDC makes a memory DC compatible with hdc; GDI+ draws the trend
+// chart into a bitmap selected here, then BitBlt ships it to the visible HDC in one
+// shot — the offscreen double-buffer that removes hover flicker (Tk does the same with
+// a pixmap).
+func createCompatibleDC(hdc syscall.Handle) syscall.Handle {
+	r, _, _ := pCreateCompatibleDC.Call(uintptr(hdc))
+	return syscall.Handle(r)
+}
+
+// createCompatibleBitmap allocates a device-independent bitmap the same pixel format as
+// hdc, sized (w,h); this is the back buffer the chart is composed onto.
+func createCompatibleBitmap(hdc syscall.Handle, w, h int32) syscall.Handle {
+	r, _, _ := pCreateCompatibleBitmap.Call(uintptr(hdc), uintptr(w), uintptr(h))
+	return syscall.Handle(r)
+}
+
+// bitBlt copies the (sx,sy) rectangle of src onto dst at (dx,dy). One call per repaint,
+// so the eye never catches the chart mid-build.
+func bitBlt(dst, src syscall.Handle, dx, dy, w, h, sx, sy int32, rop uint32) {
+	pBitBlt.Call(
+		uintptr(dst), uintptr(dx), uintptr(dy), uintptr(w), uintptr(h),
+		uintptr(src), uintptr(sx), uintptr(sy), uintptr(rop))
+}
+
+func deleteDC(hdc syscall.Handle) {
+	pDeleteDC.Call(uintptr(hdc))
 }
 
 func setTextColor(hdc syscall.Handle, c uint32) {

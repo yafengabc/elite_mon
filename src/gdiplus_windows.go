@@ -203,19 +203,60 @@ func gpDeleteBrush(b gpBrush) {
 	}
 }
 
-// gpCanvas wraps the GDI+ graphics object built on an HDC. Everything drawn goes
-// through it; Close releases it (the HDC itself stays owned by the caller).
+// gpCanvas wraps the GDI+ graphics object the chart draws into. It normally draws to an
+// offscreen memory bitmap that is blitted to the visible HDC in a single operation on
+// Close — that one BitBlt is what kills the hover flicker (the Tk build does exactly the
+// same: draw to a pixmap, then Blit). If the memory DC / bitmap can't be allocated the
+// canvas falls back to drawing straight to the HDC and reports offscreen=false, so the
+// caller keeps drawing at the control rectangle's origin and Close becomes a no-op blit.
 type gpCanvas struct {
-	g gpGraphics
+	g         gpGraphics
+	offscreen bool           // true: composed offscreen, blitted on Close
+	tgt       syscall.Handle // real HDC to blit onto (offscreen only)
+	dx, dy    int32          // destination origin in the target (offscreen only)
+	mem       syscall.Handle // memory DC (offscreen only)
+	bmp       syscall.Handle // compatible bitmap selected into mem (offscreen only)
+	old       syscall.Handle // previous bitmap in mem, restored before delete (offscreen only)
+	w, h      int32          // offscreen bitmap size
 }
 
-func gpFromHDC(hdc syscall.Handle) (*gpCanvas, bool) {
+// gpFromHDC builds a canvas for the trend chart. w/h/dx/dy describe the item rectangle in
+// the target HDC's coordinate space: an offscreen bitmap of (w,h) is allocated so the chart
+// is composed away from the screen, then blitted at (dx,dy). On any offscreen failure it
+// draws directly to hdc and reports offscreen=false so the caller's origin stays put.
+func gpFromHDC(hdc syscall.Handle, w, h, dx, dy int32) (*gpCanvas, bool) {
+	if w > 0 && h > 0 {
+		if mem := createCompatibleDC(hdc); mem != 0 {
+			if bmp := createCompatibleBitmap(hdc, w, h); bmp != 0 {
+				old := selectObject(mem, bmp)
+				var g uintptr
+				r, _, _ := pGdipCreateFromHDC.Call(uintptr(mem), uintptr(unsafe.Pointer(&g)))
+				if int32(r) == 0 && g != 0 {
+					c := &gpCanvas{
+						g: gpGraphics(g), offscreen: true,
+						tgt: hdc, dx: dx, dy: dy,
+						mem: mem, bmp: bmp, old: old, w: w, h: h,
+					}
+					c.g.setSmoothing()
+					c.g.setTextHint()
+					return c, true
+				}
+				// GDI+ refused the memory DC; tear the offscreen down and fall through.
+				if old != 0 {
+					selectObject(mem, old)
+				}
+				deleteObject(bmp)
+				deleteDC(mem)
+			}
+		}
+	}
+	// Direct-to-screen fallback, identical to the old behaviour.
 	var g uintptr
 	r, _, _ := pGdipCreateFromHDC.Call(uintptr(hdc), uintptr(unsafe.Pointer(&g)))
 	if int32(r) != 0 || g == 0 {
 		return nil, false
 	}
-	c := &gpCanvas{g: gpGraphics(g)}
+	c := &gpCanvas{g: gpGraphics(g), offscreen: false}
 	c.g.setSmoothing()
 	c.g.setTextHint()
 	return c, true
@@ -225,6 +266,15 @@ func (c *gpCanvas) Close() {
 	if c.g != 0 {
 		pGdipDeleteGraphics.Call(uintptr(c.g))
 		c.g = 0
+	}
+	if c.offscreen && c.mem != 0 {
+		bitBlt(c.tgt, c.mem, c.dx, c.dy, c.w, c.h, 0, 0, srccopy)
+		if c.old != 0 {
+			selectObject(c.mem, c.old)
+		}
+		deleteObject(c.bmp)
+		deleteDC(c.mem)
+		c.mem, c.bmp, c.old = 0, 0, 0
 	}
 }
 
