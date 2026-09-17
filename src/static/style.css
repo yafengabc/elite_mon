@@ -13,7 +13,12 @@ h3{color:#4cf;margin:12px 0 6px; border-bottom:1px solid #335; padding-bottom:4p
 .highlight{color:#fc4;}
 #bounty{display:grid;grid-template-columns:max-content max-content max-content max-content minmax(0,1fr);column-gap:6px;}
 #bounty .bamt{text-align:right;}
+#trend{position:relative;}
 #trend svg{display:block;width:100%;height:auto;}
+.ttip{position:absolute;display:none;z-index:5;max-width:92%;
+  background:#0c0c14;border:1px solid #4cf;border-radius:5px;
+  padding:6px 9px;font-size:12px;line-height:1.5;color:#e8e8f0;
+  pointer-events:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.55);}
 .tlegend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-bottom:2px;}
 .tlegend .k{color:#6f8;}
 .tlegend .b{color:#4cf;}

@@ -1833,7 +1833,7 @@ func main() {
 
 	http.Handle("/api/status", gzipHandler(http.HandlerFunc(statusHandler)))
 	http.HandleFunc("/api/i18n", i18nHandler)
-	http.HandleFunc("/", staticHandler)
+	http.Handle("/", gzipHandler(http.HandlerFunc(staticHandler)))
 
 	// The rest is left to the build flavor; main is platform-independent here:
 	//   GUI build (-tags gui) — the panel goes to the background, the main

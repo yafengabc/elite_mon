@@ -86,9 +86,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Release notes come from the annotated tag body written at tag time
+          # (git tag -a vX.Y.Z -F notes.txt / -m "..."). Fall back to the
+          # subject line when the tag has no body.
+          TAG_NOTES="$(git for-each-ref --format='%(contents:body)' "refs/tags/$GITHUB_REF_NAME")"
+          if [ -z "$TAG_NOTES" ]; then
+            TAG_NOTES="$(git for-each-ref --format='%(contents:subject)' "refs/tags/$GITHUB_REF_NAME")"
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes "$TAG_NOTES" \
             Release/elite_mon.exe \
             Release/elite_mon_win32.exe \
             Release/elite_mon_tk.exe \

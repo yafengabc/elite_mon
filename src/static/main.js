@@ -121,13 +121,10 @@ function renderTrend(pts, winText){
         g += '<text x="' + X(i).toFixed(1) + '" y="' + (T0 + ih + 18) + '" fill="#6a6a7a" font-size="11" text-anchor="middle">' + esc(pts[i].time_local) + '</text>';
     }
 
-    // Hover targets: one transparent rect per column, showing that column's numbers on hover
-    const colW = n > 1 ? step : iw;
-    for(let i = 0; i < n; i++){
-        const tip = T("panel.tip", pts[i].time_local, rate(pts[i]),
-            Number(pts[i].kills), Number(pts[i].kills_hour), Number(pts[i].bounty).toLocaleString());
-        g += '<rect x="' + (X(i) - colW / 2).toFixed(1) + '" y="' + T0 + '" width="' + colW.toFixed(1) + '" height="' + ih + '" fill="transparent"><title>' + esc(tip) + '</title></rect>';
-    }
+    // A live hover readout is wired up after the SVG is in the DOM (see below);
+    // we no longer rely on the faint native <title> tooltip, which only appears
+    // after a ~1s delay and looks like the browser's default hint - i.e. it reads
+    // as "no hover" next to the desktop build's instant readout box.
 
     // Two series on the shared axis: hour-average (blue) drawn first, the recent
     // activity rate (green) on top
@@ -138,6 +135,8 @@ function renderTrend(pts, winText){
     });
     g += '<polyline points="' + ph + '" fill="none" stroke="#4cf" stroke-width="2" stroke-linejoin="round"/>';
     g += '<polyline points="' + pr + '" fill="none" stroke="#6f8" stroke-width="2" stroke-linejoin="round"/>';
+    // Hover guide: a vertical line over the hovered column, matching the desktop build's readout.
+    g += '<line id="trendGuide" x1="0" y1="' + T0 + '" x2="0" y2="' + (T0 + ih) + '" stroke="#8ac" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>';
 
     const legend = '<div class="tlegend">'
         + '<span class="k">■ ' + T("panel.legend_10m") + '</span>'
@@ -145,7 +144,39 @@ function renderTrend(pts, winText){
         + '<span class="note">' + T("panel.trend_all", esc(winText || T("panel.session"))) + '</span>'
         + '</div>';
 
-    setHTML("trend", legend + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' + g + '</svg>');
+    const svgID = "trendSvg";
+    setHTML("trend", legend + '<svg id="' + svgID + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">' + g + '</svg>');
+
+    // Live hover readout: an instant, visible box mirroring the desktop HoverTip.
+    // The SVG scales to the container, so map the cursor back to user units first.
+    const svg = document.getElementById(svgID);
+    if(svg){
+        let tip = el.querySelector(".ttip");
+        if(!tip){ tip = document.createElement("div"); tip.className = "ttip"; el.appendChild(tip); }
+        svg.addEventListener("mousemove", function(e){
+            const r = svg.getBoundingClientRect();
+            const sx = (e.clientX - r.left) * W / r.width;
+            const sy = (e.clientY - r.top) * H / r.height;
+            if(sx < L || sx > L + iw || sy < T0 || sy > T0 + ih){ tip.style.display = "none"; const g0 = document.getElementById("trendGuide"); if(g0){ g0.style.display = "none"; } return; }
+            let i = n > 1 ? Math.round((sx - L) / step) : 0;
+            if(i < 0){ i = 0; } else if(i > n - 1){ i = n - 1; }
+            const p = pts[i];
+            tip.textContent = T("panel.tip", p.time_local, rate(p),
+                Number(p.kills), Number(p.kills_hour), Number(p.bounty).toLocaleString());
+            tip.style.display = "block";
+            const guide = document.getElementById("trendGuide");
+            if(guide){ guide.setAttribute("x1", X(i).toFixed(1)); guide.setAttribute("x2", X(i).toFixed(1)); guide.style.display = "block"; }
+            const tr = el.getBoundingClientRect();
+            let x = e.clientX - tr.left + 14;
+            let y = e.clientY - tr.top + 14;
+            const tw = tip.offsetWidth, th = tip.offsetHeight;
+            if(x + tw > tr.width){ x = e.clientX - tr.left - tw - 14; }
+            if(y + th > tr.height){ y = e.clientY - tr.top - th - 14; }
+            tip.style.left = Math.max(0, x) + "px";
+            tip.style.top = Math.max(0, y) + "px";
+        });
+        svg.addEventListener("mouseleave", function(){ tip.style.display = "none"; const g2 = document.getElementById("trendGuide"); if(g2){ g2.style.display = "none"; } });
+    }
 }
 
 function render(data){
