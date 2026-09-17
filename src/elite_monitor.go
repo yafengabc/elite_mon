@@ -73,6 +73,13 @@ const (
 	trendBucket    = 10 * time.Minute
 	maxTrendPoints = 720 // 720 × 10 min = 120 hours
 
+	// How many trendBucket cells make an hour, and therefore the factor that
+	// turns a cell's own count into a kills-per-hour rate. Three copies of this
+	// number must agree: this constant, TREND_CELLS_PER_HOUR in static/main.js
+	// (the web panel) and the shared GUI chart builder in trendchart.go, which
+	// reads it from here rather than restating 6.
+	trendCellsPerHour = int(time.Hour / trendBucket)
+
 	// Rolling window for the hour-average curve, matching the panel's
 	// "last hour kills". Deliberately not tied to the configurable stats
 	// window: changing that would change what the curve means, making

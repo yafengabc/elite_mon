@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,6 +113,7 @@ func buildUIScript() string {
 catch {font configure TkTextFont -size 10}
 catch {font configure TkFixedFont -size 10}
 catch {font create TitleFont -family [font actual TkDefaultFont -family] -size 16}
+catch {font create TkSmallFont -family [font actual TkDefaultFont -family] -size 9}
 wm title . "` + appTitle() + `"
 wm geometry . 1240x860
 wm minsize . 860 560
@@ -187,6 +189,17 @@ grid rowconfigure .nb.d 1 -weight 1
 grid columnconfigure .nb.d 0 -weight 1
 grid columnconfigure .nb.d 1 -weight 1
 
+# ---- Kill-trend page: the same chart the web panel draws ----
+# A plain canvas, everything inside it is drawn by Go each refresh (tkDrawTrend).
+# highlightthickness 0 removes the focus ring Tk draws around the widget by default,
+# and the background is taken from the theme so it matches every other page.
+ttk::frame .nb.t
+.nb add .nb.t -text "` + T("panel.trend_title") + `"
+canvas .nb.t.c -highlightthickness 0 -background [ttk::style lookup TFrame -background]
+grid .nb.t.c -row 0 -column 0 -sticky nsew -padx 6 -pady 2
+grid rowconfigure .nb.t 0 -weight 1
+grid columnconfigure .nb.t 0 -weight 1
+
 # ---- Bottom status bar (panel port / LAN / poll interval), same content as the Win32 build ----
 # Placed below the button row: buttons are the window's actions, the status bar is the window's state.
 # The text is fixed at runtime; the Go side fills it once in runTk (statusBarParts).
@@ -261,6 +274,215 @@ func tkRefresh() {
 		mb.WriteString(st.MessageLines[i] + "\n")
 	}
 	tkSetText(".nb.d.msg", mb.String())
+
+	tkDrawTrend(st)
+}
+
+// tkTrendCanvas is the chart's canvas, created by buildUIScript.
+const tkTrendCanvas = ".nb.t.c"
+
+// tkTrendState remembers the last frame drawn, so the chart is only rebuilt when
+// something actually changed: new data, or a resized window (the canvas has no
+// fixed size, it follows the notebook, and a resize changes the whole layout).
+var tkTrendState struct {
+	sig   trendKey
+	w, h  int
+	hover int  // bucket under the cursor, -1 for none
+	stale bool // a hover change forces the next draw through the signature check
+	drawn bool
+}
+
+// tkDrawTrend draws the trend chart as canvas items. It is the Tk twin of the
+// Win32 build's drawTrend and shares its geometry — see trendchart.go.
+//
+// Every string travels through a Tcl variable and the script only dereferences
+// it. Inlining text into the script would let a translation containing "$" or
+// "[" be interpreted as code, and language files are user-editable.
+func tkDrawTrend(st AppStatus) {
+	w, h := tkWidgetSize(tkTrendCanvas)
+	if w < 2 || h < 2 {
+		return // not mapped yet; the next tick will see it
+	}
+	sig := trendSignature(st)
+	if tkTrendState.drawn && !tkTrendState.stale &&
+		sig == tkTrendState.sig && w == tkTrendState.w && h == tkTrendState.h {
+		return
+	}
+	tkTrendState.sig, tkTrendState.w, tkTrendState.h = sig, w, h
+	tkTrendState.drawn, tkTrendState.stale = true, false
+
+	c := buildTrendChart(st.KillTrend, st.TrendWindowText, int32(w), int32(h))
+
+	var (
+		b strings.Builder
+		n int
+	)
+	// ref writes text into a fresh global and returns how to dereference it
+	ref := func(s string) string {
+		name := fmt.Sprintf("::tv%d", n)
+		n++
+		tkSetVar(name, s)
+		return "$" + name
+	}
+
+	// Colours are asked of the theme where possible: hardcoded ones would be
+	// invisible or garish under a dark theme. The curves keep the hues the web
+	// panel uses, darkened for a light face (same as the Win32 build).
+	b.WriteString("set ::tkfg [ttk::style lookup TLabel -foreground]\n")
+	if c.Empty {
+		fmt.Fprintf(&b, "%s delete all\n", tkTrendCanvas)
+		fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor center -justify center -fill $::tkfg\n",
+			tkTrendCanvas, w/2, h/2, ref(c.Note))
+		tkEval(b.String())
+		return
+	}
+
+	b.WriteString(fmt.Sprintf("%s delete all\n", tkTrendCanvas))
+
+	// Grid rows and their tick numbers; the numbers sit beside the right-hand column
+	for _, tk := range c.Ticks {
+		fmt.Fprintf(&b, "%s create line 0 %d %d %d -fill %s -width 1\n",
+			tkTrendCanvas, tk.Y, c.AxisX, tk.Y, tkColorGrid)
+		fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor w -fill $::tkfg -font TkSmallFont\n",
+			tkTrendCanvas, c.AxisX+6, tk.Y, ref(tk.Text))
+	}
+	// Unit for those bare numbers
+	fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor sw -fill $::tkfg -font TkSmallFont\n",
+		tkTrendCanvas, c.AxisX+6, 14, ref(c.Unit))
+
+	// Clock times, hanging from the bottom axis
+	for _, lb := range c.Labels {
+		fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor n -fill $::tkfg -font TkSmallFont\n",
+			tkTrendCanvas, lb.X, lb.Y, ref(lb.Text))
+	}
+
+	// Legend: a swatch per curve, each label followed by the next swatch. Widths
+	// are measured because the labels are translated - a fixed pitch would
+	// overlap in any language longer than the one it was tuned for.
+	lx, ly := 8, 4
+	for _, it := range []struct{ color, text string }{
+		{tkColorRate, c.LegendRate}, {tkColorHour, c.LegendHour},
+	} {
+		fmt.Fprintf(&b, "%s create rectangle %d %d %d %d -fill %s -outline %s\n",
+			tkTrendCanvas, lx, ly+3, lx+11, ly+14, it.color, it.color)
+		name := ref(it.text)
+		fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor nw -fill $::tkfg -font TkSmallFont\n",
+			tkTrendCanvas, lx+16, ly, name)
+		lx += 16 + tkFontWidth("TkSmallFont", name) + 18
+	}
+	// The covered span follows the legend on the same row (as in the web panel),
+	// rather than being right-aligned: the tick column's unit caption occupies the
+	// top-right corner and the two overlapped.
+	fmt.Fprintf(&b, "%s create text %d %d -text %s -anchor nw -fill $::tkfg -font TkSmallFont\n",
+		tkTrendCanvas, lx+10, ly, ref(c.Span))
+
+	// Hour average first, so the immediate rate curve lies on top of it
+	tkTrendLine(&b, c.Hour, tkColorHour)
+	tkTrendLine(&b, c.Rate, tkColorRate)
+
+	// Hover readout on top: a guide line down the hovered bucket and a box with its
+	// numbers — the desktop form of the web panel's <title> per column.
+	if hov := tkTrendState.hover; hov >= 0 && hov < len(c.Cols) {
+		col := c.Cols[hov]
+		fmt.Fprintf(&b, "%s create line %d %d %d %d -fill %s -width 1\n",
+			tkTrendCanvas, col.X, c.PlotTop, col.X, c.PlotBottom, tkColorGrid)
+
+		// The box is created around the text rather than measured first: bbox asks
+		// Tk for the real wrapped size, then the rectangle is lowered behind it.
+		// Anchored at the plot top because the wrapped text is at most a few lines
+		// and that is always inside the canvas.
+		bx := int(col.X) + 12
+		if bx+trendTipW > w-4 {
+			bx = int(col.X) - 12 - trendTipW
+		}
+		if bx < 4 {
+			bx = 4
+		}
+		fmt.Fprintf(&b, "set ::ttip [%s create text %d %d -text %s -anchor nw -width %d -justify left -fill $::tkfg -font TkSmallFont]\n",
+			tkTrendCanvas, bx+7, c.PlotTop+5, ref(c.HoverTip(hov)), trendTipW-14)
+		fmt.Fprintf(&b, "set ::tbb [%s bbox $::ttip]\n", tkTrendCanvas)
+		fmt.Fprintf(&b, "set ::trid [%s create rectangle [expr {[lindex $::tbb 0]-7}] [expr {[lindex $::tbb 1]-5}] [expr {[lindex $::tbb 2]+7}] [expr {[lindex $::tbb 3]+5}] -fill %s -outline %s]\n",
+			tkTrendCanvas, tkColorTipBg, tkColorGrid)
+		fmt.Fprintf(&b, "%s lower $::trid $::ttip\n", tkTrendCanvas)
+	}
+
+	tkEval(b.String())
+}
+
+// tkTrendMotion tracks the pointer over the chart (bound to <Motion>). The event's
+// X/Y are already relative to the canvas, which is what the layout expects.
+func tkTrendMotion(e *Event) {
+	w, h := tkWidgetSize(tkTrendCanvas)
+	if w < 2 || h < 2 {
+		return
+	}
+	st := snapshotStatus()
+	c := buildTrendChart(st.KillTrend, st.TrendWindowText, int32(w), int32(h))
+	if col := c.ColumnAt(int32(e.X), int32(e.Y)); col != tkTrendState.hover {
+		tkTrendState.hover, tkTrendState.stale = col, true
+		// Redraw now: leaving it to the 500ms tick would make the readout trail the
+		// pointer, which reads as a broken tooltip.
+		tkDrawTrend(st)
+	}
+}
+
+// tkTrendLeave clears the readout when the pointer leaves the canvas, otherwise the
+// last box stays on screen with nothing under the cursor.
+func tkTrendLeave(e *Event) {
+	if tkTrendState.hover >= 0 {
+		tkTrendState.hover, tkTrendState.stale = -1, true
+		tkDrawTrend(snapshotStatus())
+	}
+}
+
+// Trend chart colours: the same two hues the Win32 build and the web panel use.
+const (
+	tkColorGrid = "#909090"
+	tkColorRate = "#0E7A2A" // kill rate (10 min, extrapolated)
+	tkColorHour = "#005AC0" // kills in the last hour
+
+	// Hover readout box. The fill follows the theme so it does not glare under a
+	// dark one; Tk has no system tooltip colour to borrow (Win32 does, and uses it).
+	tkColorTipBg = "#ffffe1"
+)
+
+// tkTrendLine appends one create line command for a whole series. Passing every
+// vertex in a single command matters: one item moves, scales and redraws as a unit.
+func tkTrendLine(b *strings.Builder, pts []trendXY, color string) {
+	if len(pts) < 2 {
+		return
+	}
+	fmt.Fprintf(b, "%s create line", tkTrendCanvas)
+	for _, p := range pts {
+		fmt.Fprintf(b, " %d %d", p.X, p.Y)
+	}
+	fmt.Fprintf(b, " -fill %s -width 2 -smooth 0\n", color)
+}
+
+// tkWidgetSize reports a widget's current pixel size (0,0 when not mapped yet).
+func tkWidgetSize(path string) (w, h int) {
+	ws, err := Eval("winfo width " + path)
+	if err != nil {
+		return 0, 0
+	}
+	hs, err := Eval("winfo height " + path)
+	if err != nil {
+		return 0, 0
+	}
+	w, _ = strconv.Atoi(strings.TrimSpace(ws))
+	h, _ = strconv.Atoi(strings.TrimSpace(hs))
+	return w, h
+}
+
+// tkFontWidth measures a string already stored in a Tcl variable (varRef, e.g.
+// "$::tv0"). One seek later a legend can be laid out without guessing.
+func tkFontWidth(font, varRef string) int {
+	s, err := Eval(fmt.Sprintf("font measure %s %s", font, varRef))
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
 }
 
 // tkOpen opens a file or URL with the system default handler (rundll32 on Windows,
@@ -299,6 +521,7 @@ func runTk() {
 	// this overrides it with the current one).
 	tkEval(`.nb tab 0 -text "` + T("tab.status") + `"`)
 	tkEval(`.nb tab 1 -text "` + T("tab.data") + `"`)
+	tkEval(`.nb tab 2 -text "` + T("panel.trend_title") + `"`)
 	tkSetLabel(".nb.s.state", T("app.init"))
 
 	// Bottom button row: native widgets + Command(func) callbacks, so no custom Tcl
@@ -329,6 +552,12 @@ func runTk() {
 	for i, txt := range sbParts {
 		tkSetLabel(fmt.Sprintf(".sb.p%d", i), txt)
 	}
+
+	// Chart hover: the canvas reports pointer movement, and the handler redraws with
+	// the readout. Bind takes the canvas path as a tag and Command wraps a
+	// func(*Event), the same pair the buttons use above — no custom Tcl command.
+	Bind(tkTrendCanvas, "<Motion>", Command(tkTrendMotion))
+	Bind(tkTrendCanvas, "<Leave>", Command(tkTrendLeave))
 
 	// Window icon: largest first (the order Tk docs recommend).
 	// Must happen before App.Wait() — if Wait finds no icon set, it installs a default
