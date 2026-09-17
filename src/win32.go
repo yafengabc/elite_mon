@@ -61,6 +61,8 @@ var (
 	pTrackPopupMenu         = user32.NewProc("TrackPopupMenu")
 	pDestroyMenu            = user32.NewProc("DestroyMenu")
 	pGetCursorPos           = user32.NewProc("GetCursorPos")
+	pScreenToClient         = user32.NewProc("ScreenToClient")
+	pTrackMouseEvent        = user32.NewProc("TrackMouseEvent")
 	pSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
 	pRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 	pDrawTextW              = user32.NewProc("DrawTextW")
@@ -121,6 +123,9 @@ const (
 	wmDrawItem       = 0x002B
 	wmCommand        = 0x0111
 	wmTimer          = 0x0113
+	wmSetCursor      = 0x0020
+	wmMouseMove      = 0x0200
+	wmMouseLeave     = 0x02A3
 	wmCtlColorStatic = 0x0138
 	wmSetFont        = 0x0030
 	wmNull           = 0x0000
@@ -131,6 +136,7 @@ const (
 
 	ssLeft           = 0x00000000
 	ssLeftNoWordWrap = 0x0000000C
+	ssOwnerDraw      = 0x0000000D // the parent paints it via WM_DRAWITEM (the trend chart)
 	ssSunken         = 0x00001000
 
 	lbsNotify         = 0x0001
@@ -177,6 +183,10 @@ const (
 	color3DShadow      = 16
 	colorGrayText      = 17
 	colorButtonText    = 18
+	colorInfoText      = 23 // tooltip text / background: the system's own pair, so a
+	colorInfoBk        = 24 // hover readout matches the OS tooltips instead of guessing
+
+	tmeLeave = 0x00000002 // TrackMouseEvent: post WM_MOUSELEAVE once, on exit
 
 	idiApplication = 32512
 	idcArrow       = 32512
@@ -520,6 +530,31 @@ func messageBox(parent syscall.Handle, text, title string, flags uint32) {
 
 func fillRect(hdc syscall.Handle, rc *rectT, brush syscall.Handle) {
 	pFillRect.Call(uintptr(hdc), uintptr(unsafe.Pointer(rc)), uintptr(brush))
+}
+
+// screenToClient converts a screen point into a window's client coordinates.
+// Needed to turn GetCursorPos into something comparable with a child control's rect.
+func screenToClient(hwnd syscall.Handle, pt *pointT) {
+	pScreenToClient.Call(uintptr(hwnd), uintptr(unsafe.Pointer(pt)))
+}
+
+// trackMouseLeave arms a one-shot WM_MOUSELEAVE for hwnd. Windows posts it once,
+// when the cursor next leaves the window, and the call must be repeated from
+// WM_MOUSEMOVE to keep watching — which is what the trend chart's hover readout
+// needs so it does not stay on screen after the pointer has gone elsewhere.
+func trackMouseLeave(hwnd syscall.Handle) {
+	tme := struct {
+		cbSize    uint32
+		dwFlags   uint32
+		hwndTrack syscall.Handle
+		dwHover   uint32
+	}{cbSize: uint32(unsafe.Sizeof(struct {
+		cbSize    uint32
+		dwFlags   uint32
+		hwndTrack syscall.Handle
+		dwHover   uint32
+	}{})), dwFlags: tmeLeave, hwndTrack: hwnd}
+	pTrackMouseEvent.Call(uintptr(unsafe.Pointer(&tme)))
 }
 
 // ------------------------------------------------------------------

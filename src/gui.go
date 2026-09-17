@@ -2,10 +2,11 @@
 
 package main
 
-// GUI: a pure Win32 SDK window (no webview, no third-party libraries) with two tabs:
+// GUI: a pure Win32 SDK window (no webview, no third-party libraries) with three tabs:
 //
 //	Runtime status — the program's parameters, status line, and log (replaces the old console window)
 //	Data panel — what the web panel shows: summary / ship info / bounty log / events
+//	Kill trend — the web panel's trend chart, drawn here with plain GDI (see drawTrend)
 //
 // Appearance comes from **native system visual styles**, no custom skinning: app.manifest
 // declares Common-Controls 6.0, so Windows draws buttons / scrollbars / tabs / status bar in
@@ -13,7 +14,10 @@ package main
 // Tabs use native SysTabControl32, the bottom status bar native msctls_statusbar32;
 // switching tabs shows / hides whole groups of child controls (no property sheets or child
 // dialogs, one less layer of nesting).
-// The only panel item not ported is the "kill trend" curve — the user explicitly said no.
+// The trend chart is the one thing here that is hand-drawn rather than a system
+// control: WM_DRAWITEM on an owner-drawn static, with the row of GDI primitives at
+// the top of win32.go. It shares its geometry with the Tk build (trendchart.go) and
+// with the web panel, so all three look the same.
 //
 // On Windows `-tags gui` (no tk) uses this file; `-tags gui,tk` uses the Tk UI in tk.go.
 // Both files provide startLogging / runUI, pick one against tk.go; on Linux only tk.go
@@ -47,11 +51,13 @@ const (
 	idCapShip = 109
 	idCapCnt  = 110
 	idCapMsg  = 111
+	idTrend   = 112 // tab 3: the trend chart (owner-drawn static)
 	idStatus  = 120
 
 	// Tabs
 	tabStatus = 0
 	tabData   = 1
+	tabTrend  = 2
 
 	winTimerID = 1
 
@@ -69,13 +75,17 @@ const (
 	maxLogLines = 800
 )
 
-// tabLabels returns the tab strip text, in the same order as tabStatus / tabData.
+// tabLabels returns the tab strip text, in the same order as tabStatus /
+// tabData / tabTrend.
 // A function, not a package-level variable: T() cannot be evaluated during
 // package init (the language tables register in init(), which runs after every
 // variable initializer), so a var here would freeze the raw ids "tab.status" /
 // "tab.data" into the tab strip.
+//
+// The third label reuses the web panel's chart caption rather than inventing a
+// second name for the same thing.
 func tabLabels() []string {
-	return []string{T("tab.status"), T("tab.data")}
+	return []string{T("tab.status"), T("tab.data"), T("panel.trend_title")}
 }
 
 // ------------------------------------------------------------------
@@ -228,13 +238,19 @@ type guiApp struct {
 	fontBold syscall.Handle // bold, for panel captions (summary / ship info …)
 	lineH    int32
 
-	// Tabs use the native control, no custom drawing; the two tabs' controls are still shown
-	// / hidden as groups. The page content rect is computed on the fly from TCM_ADJUSTRECT in
-	// layout, never cached.
-	tab   int            // current tab (tabStatus / tabData)
+	// The tab strip itself is the native control, no custom drawing; each page's
+	// controls are still shown / hidden as a group. The page content rect is
+	// computed on the fly from TCM_ADJUSTRECT in layout, never cached.
+	tab   int            // current tab (tabStatus / tabData / tabTrend)
 	tabs  syscall.Handle // SysTabControl32
 	page1 []syscall.Handle
 	page2 []syscall.Handle
+	page3 []syscall.Handle
+
+	// Tab 3
+	trend      syscall.Handle
+	lastTrend  trendKey // signature of the plotted data; repaint only when it moves
+	trendHover int      // bucket under the cursor, -1 for none
 
 	// Tab 1
 	info   syscall.Handle
@@ -313,6 +329,12 @@ const (
 	colErr     = uint32(0x000000CC) // #CC0000 error: dark red
 	colBounty  = uint32(0x00007A00) // #007A00 kill bounty: dark green
 	colMission = uint32(0x00B06000) // #0060B0 mission bounty: dark blue
+
+	// Trend chart curves. The web panel draws the same two series on a dark card
+	// with bright #6f8 / #4cf; here the background is the system face colour, so
+	// they are darkened to stay legible on it — same two hues, same pairing.
+	colRateLine = uint32(0x002A7A0E) // #0E7A2A kill rate (10 min, extrapolated)
+	colHourLine = uint32(0x00C05A00) // #005AC0 kills in the last hour
 )
 
 // ------------------------------------------------------------------
@@ -345,6 +367,14 @@ func runGUI() {
 	// Go goroutines get moved between threads, so without locking the message loop
 	// never receives anything.
 	runtime.LockOSThread()
+
+	// GDI+ backs the trend chart's anti-aliased drawing. Start it once for the
+	// process; the trend tab's owner-draw calls into it during the message loop,
+	// so it must be alive before the window is shown.
+	if err := gdiplusStartup(); err != nil {
+		log.Println("GDI+ init failed:", err)
+	}
+	defer gdiplusShutdown()
 
 	hInst := getModuleHandle()
 
@@ -452,6 +482,7 @@ func (a *guiApp) createControls() {
 	labels := tabLabels()
 	tabInsert(a.tabs, 0, labels[0])
 	tabInsert(a.tabs, 1, labels[1])
+	tabInsert(a.tabs, 2, labels[2])
 	sendMessage(a.tabs, tcmSetCurSel, uintptr(a.tab), 0)
 
 	// ---- Tab 1: runtime status ----
@@ -488,6 +519,13 @@ func (a *guiApp) createControls() {
 	a.capCnt = a.caption(T("tab.bounty_mission"), idCapCnt)
 	a.capMsg = a.caption(T("tab.events"), idCapMsg)
 
+	// ---- Tab 3: trend chart ----
+	// One owner-drawn static covering the whole page: it draws its own grid, axis,
+	// labels and curves in WM_DRAWITEM (drawTrend). One control instead of a dozen
+	// means one rectangle to lay out, and no seams for the theme to paint white.
+	a.trend = a.control("STATIC", "", wsChild|wsVisible|ssOwnerDraw, 0, idTrend)
+	a.trendHover = -1 // no column under the cursor yet
+
 	// ---- Native status bar ----
 	// Segment widths depend on the window width, so they are set in layout. It is a common
 	// control v6, so the theme paints its look.
@@ -499,8 +537,10 @@ func (a *guiApp) createControls() {
 		a.capStat, a.statBox, a.capShip, a.shipBox,
 		a.capCnt, a.bounty, a.capMsg, a.msgBox,
 	}
+	a.page3 = []syscall.Handle{a.trend}
 
 	pageCtl := append(append([]syscall.Handle{}, a.page1...), a.page2...)
+	pageCtl = append(pageCtl, a.page3...)
 	for _, h := range append(pageCtl, a.tabs, a.status) {
 		sendMessage(h, wmSetFont, uintptr(a.font), 1)
 	}
@@ -525,12 +565,16 @@ func (a *guiApp) setItemHeights() {
 }
 
 // uiFontNames are the UI font candidates: YaHei preferred, SimSun as the last fallback.
-// -12 is the character height (about 9pt, the standard system UI size).
+// uiFontHeight is the character height in px (about 9pt, the standard system UI size):
+// GDI takes it negated, and the GDI+ chart font uses it directly as its em size so
+// the two draw at the same visual size.
+const uiFontHeight = 12
+
 var uiFontNames = []string{"Microsoft YaHei UI", "Microsoft YaHei", "SimSun"}
 
 func createUIFont() syscall.Handle {
 	for _, name := range uiFontNames {
-		if f := createFont(-12, name); f != 0 {
+		if f := createFont(-uiFontHeight, name); f != 0 {
 			return f
 		}
 	}
@@ -541,7 +585,7 @@ func createUIFont() syscall.Handle {
 // info …) — captions are set apart by font weight, not by drawn separators.
 func createUIFontBold() syscall.Handle {
 	for _, name := range uiFontNames {
-		if f := createFontEx(-12, fwBold, name); f != 0 {
+		if f := createFontEx(-uiFontHeight, fwBold, name); f != 0 {
 			return f
 		}
 	}
@@ -595,7 +639,35 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 			return app.drawLogItem(dis)
 		case idBounty:
 			return app.drawBountyItem(dis)
+		case idTrend:
+			return app.drawTrend(dis)
 		}
+
+	case wmSetCursor:
+		// Mouse movement shows up as WM_SETCURSOR rather than WM_MOUSEMOVE,
+		// because the chart is a child control and the message belongs to
+		// whichever window the cursor is over.
+		//
+		// wParam is deliberately ignored: it does not reliably name the chart's
+		// control (the handle observed here is the frame's own), so the decision
+		// comes from the cursor position against the chart's rectangle instead —
+		// see hoverTrend. Returning 0 lets the arrow cursor be set.
+		if app.tab == tabTrend {
+			app.hoverTrend()
+		}
+		return 0
+
+	case wmMouseMove, wmMouseLeave:
+		// Over the frame itself, or the cursor has just left it (TME_LEAVE, armed
+		// below): either way re-derive the readout from where the cursor now is,
+		// which clears it unless it is still on the chart.
+		if app.tab == tabTrend {
+			app.hoverTrend()
+			if msg == wmMouseMove {
+				trackMouseLeave(app.hwnd) // one-shot: re-arm for the next exit
+			}
+		}
+		return 0
 
 	case wmCtlColorStatic:
 		hdc := syscall.Handle(wParam)
@@ -770,6 +842,190 @@ func (a *guiApp) drawBountyItem(dis *drawItemStruct) uintptr {
 	return 1
 }
 
+// ------------------------------------------------------------------
+// Tab 3: trend chart (owner-drawn static)
+// ------------------------------------------------------------------
+
+// hoverTrend re-derives which bucket the cursor is over and repaints if it moved.
+// Called from WM_SETCURSOR, which is the only mouse traffic the parent sees while
+// the cursor is over the chart's child control.
+func (a *guiApp) hoverTrend() {
+	pt := getCursorPos()
+	screenToClient(a.trend, &pt)
+
+	rc := getClientRect(a.trend)
+	st := snapshotStatus()
+	c := buildTrendChart(st.KillTrend, st.TrendWindowText, rc.Right, rc.Bottom)
+	if col := c.ColumnAt(pt.X, pt.Y); col != a.trendHover {
+		a.trendHover = col
+		invalidateRect(a.trend, nil)
+	}
+}
+
+// setTrend repaints the chart, and only when the plotted data actually moved.
+//
+// Nothing else affects what is drawn, so the whole refresh is one InvalidateRect:
+// WM_DRAWITEM then re-reads the status and lays the chart out for whatever size
+// the control currently is. Skipping the no-op case matters because this runs
+// twice a second and repainting the control repaints its whole rectangle.
+func (a *guiApp) setTrend(st AppStatus) {
+	if sig := trendSignature(st); sig != a.lastTrend {
+		a.lastTrend = sig
+		invalidateRect(a.trend, nil)
+	}
+}
+
+// drawTrend paints the trend chart into the static's rectangle: grid, shared
+// kills-per-hour axis on the right, thinned clock labels along the bottom, and
+// the two curves on top. It is the desktop twin of the web panel's renderTrend
+// and shares its geometry with it and with Tk — see trendchart.go.
+func (a *guiApp) drawTrend(dis *drawItemStruct) uintptr {
+	rc := dis.RcItem
+	// The chart is GDI+ (anti-aliased) now; build a graphics on the item's HDC. If
+	// GDI+ is unavailable for some reason, fall back to a flat GDI fill so the tab
+	// is never left transparent.
+	g, ok := gpFromHDC(dis.HDC)
+	if !ok {
+		fillRect(dis.HDC, &rc, getSysColorBrush(colorButtonFace))
+		return 1
+	}
+	defer g.Close()
+
+	ox, oy := rc.Left, rc.Top
+	st := snapshotStatus()
+	c := buildTrendChart(st.KillTrend, st.TrendWindowText, rc.Right-rc.Left, rc.Bottom-rc.Top)
+
+	// No system control paints the background, so lay it down first or the previous
+	// frame smears.
+	g.fillRect(ox, oy, rc.Right-rc.Left, rc.Bottom-rc.Top, gpNewBrush(argb(getSysColor(colorButtonFace))))
+
+	font := gpNewFont(uiFontHeight)
+	defer gpDeleteFont(font)
+
+	if c.Empty {
+		note := gpNewBrush(argb(getSysColor(colorGrayText)))
+		g.text(c.Note, float32(ox+8), float32(oy+8),
+			float32(rc.Right-rc.Left-16), float32(rc.Bottom-rc.Top-16),
+			gpFmtCC, font, note)
+		gpDeleteBrush(note)
+		return 1
+	}
+
+	grid := gpNewBrush(argb(getSysColor(colorGrayText)))
+	defer gpDeleteBrush(grid)
+	gridPen := gpNewPen(argb(getSysColor(colorGrayText)), 1)
+	defer gpDeletePen(gridPen)
+	ratePen := gpNewPen(argb(colRateLine), 2)
+	hourPen := gpNewPen(argb(colHourLine), 2)
+	defer gpDeletePen(ratePen)
+	defer gpDeletePen(hourPen)
+
+	// Grid rows, each with its tick number in the right-hand column, vertically
+	// centred on the line; the unit caption sits above the topmost one.
+	for _, tk := range c.Ticks {
+		g.line(ox, oy+tk.Y, ox+c.AxisX, oy+tk.Y, gridPen)
+		g.text(tk.Text,
+			float32(ox+c.AxisX+6), float32(oy+tk.Y)-float32(a.lineH)/2,
+			float32(rc.Right-c.AxisX-8), float32(a.lineH),
+			gpFmtNC, font, grid)
+	}
+	g.text(c.Unit,
+		float32(ox+c.AxisX+6), float32(oy+2),
+		float32(rc.Right-c.AxisX-8), float32(a.lineH),
+		gpFmtNN, font, grid)
+
+	// Clock labels, centred on their point, half-width limited so neighbours never
+	// collide even at the thickest thinning.
+	for _, lb := range c.Labels {
+		g.text(lb.Text,
+			float32(ox+lb.X-trendLabelHalfW), float32(oy+lb.Y),
+			float32(trendLabelHalfW*2), float32(a.lineH),
+			gpFmtCC, font, grid)
+	}
+
+	// Legend row along the top: a swatch per curve, then the covered span. All
+	// three share one row and stop at the tick column: the unit caption lives
+	// there, and right-aligning the span under it collided with it.
+	ly := int32(4)
+	lx := ox + int32(trendPadL/2)
+	for _, item := range []struct {
+		color uint32
+		text  string
+	}{{colRateLine, c.LegendRate}, {colHourLine, c.LegendHour}} {
+		sw := gpNewBrush(argb(item.color))
+		g.fillRect(lx, oy+ly+int32(float32(a.lineH)/2)-4, 10, 10, sw)
+		gpDeleteBrush(sw)
+		g.text(item.text,
+			float32(lx+14), float32(oy+ly),
+			float32(ox+c.AxisX-6-(lx+14)), float32(a.lineH+4),
+			gpFmtNN, font, grid)
+		// Advance by GDI+'s own measurement: GDI's idea of the width differs just
+		// enough for the next swatch to land on top of this label's tail.
+		lx += 14 + int32(g.measure(item.text, font, 10000).W+1) + 18
+	}
+	g.text(c.Span,
+		float32(lx), float32(oy+ly),
+		float32(ox+c.AxisX-6-lx), float32(a.lineH+4),
+		gpFmtNN, font, grid)
+
+	// The hour average first, so the more immediate rate curve lies on top of it.
+	g.poly(c.Hour, ox, oy, hourPen)
+	g.poly(c.Rate, ox, oy, ratePen)
+
+	// Hover readout, on top of everything: a guide line down the bucket the cursor
+	// is over plus a box with that bucket's numbers — the desktop form of the web
+	// panel's <title> on each column.
+	if hov := a.trendHover; hov >= 0 && hov < len(c.Cols) {
+		col := c.Cols[hov]
+		g.line(ox+col.X, oy+c.PlotTop, ox+col.X, oy+c.PlotBottom, gridPen)
+		drawHoverTip(g, rc, c.HoverTip(hov), ox+col.X, oy+c.PlotTop, font)
+	}
+	return 1
+}
+
+// drawHoverTip draws the readout box through GDI+. The box is measured with the very
+// font that draws it (GdipMeasureString at the shared wrap width), so its text can
+// never outgrow it, then flipped to the other side of the guide line and clamped to
+// the control so it stays readable at both ends of the chart.
+func drawHoverTip(g *gpCanvas, rc rectT, tip string, anchorX, anchorY int32, font gpFont) {
+	if tip == "" {
+		return
+	}
+	m := g.measure(tip, font, trendTipW)
+	bw, bh := int32(m.W)+14, int32(m.H)+10
+	if bw <= 14 {
+		return
+	}
+	bx := anchorX + 12
+	if bx+bw > rc.Right-4 { // no room on the right: flip to the left of the line
+		bx = anchorX - 12 - bw
+	}
+	if bx < rc.Left+4 {
+		bx = rc.Left + 4
+	}
+	by := anchorY
+	if by+bh > rc.Bottom-4 {
+		by = rc.Bottom - 4 - bh
+	}
+	if by < rc.Top+4 {
+		by = rc.Top + 4
+	}
+
+	bk := gpNewBrush(argb(getSysColor(colorInfoBk)))
+	g.fillRect(bx, by, bw, bh, bk)
+	gpDeleteBrush(bk)
+	border := gpNewPen(argb(getSysColor(colorGrayText)), 1)
+	g.drawRect(bx, by, bw, bh, border)
+	gpDeletePen(border)
+
+	tb := gpNewBrush(argb(getSysColor(colorInfoText)))
+	g.text(tip,
+		float32(bx+7), float32(by+5),
+		float32(bw-14), float32(bh-10),
+		gpFmtNN, font, tb)
+	gpDeleteBrush(tb)
+}
+
 // vline draws a 1px vertical rule (a plain FillRect, no line-drawing API).
 func vline(hdc syscall.Handle, x, top, bottom int32) {
 	if bottom <= top {
@@ -791,8 +1047,9 @@ func (a *guiApp) onTabChange() {
 		return
 	}
 	a.tab = sel
-	a.layout()  // layout ends with applyTab, which also fixes the new tab's layout
-	a.refresh() // sync immediately, don't wait for the next 500ms timer
+	a.trendHover = -1 // the readout belongs to the tab we are leaving
+	a.layout()        // layout ends with applyTab, which also fixes the new tab's layout
+	a.refresh()       // sync immediately, don't wait for the next 500ms timer
 }
 
 // applyTab shows / hides the controls of the current tab as a group.
@@ -808,6 +1065,7 @@ func (a *guiApp) applyTab() {
 	}
 	show(a.page1, a.tab == tabStatus)
 	show(a.page2, a.tab == tabData)
+	show(a.page3, a.tab == tabTrend)
 }
 
 // ------------------------------------------------------------------
@@ -913,6 +1171,11 @@ func (a *guiApp) layout() {
 	moveWindow(a.bounty, x0, y, colW, listH)
 	moveWindow(a.msgBox, x0+colW+gap, y, colW, listH)
 
+	// ---- Tab 3: trend chart ----
+	// It fills the page: the plot inside it re-lays itself out from whatever size
+	// the control ends up with, so there is nothing here to measure.
+	moveWindow(a.trend, x0, y0, pw, pb-y0)
+
 	a.applyTab()
 }
 
@@ -943,13 +1206,16 @@ func (a *guiApp) refresh() {
 	a.pumpLog()
 	a.setStatus()
 
-	// The data panel blocks are only refreshed while visible — no point feeding lists hidden
-	// behind another tab every 500ms. Switching back re-runs refresh from layout, and the
-	// incremental sync fills in what was missed.
-	if a.tab == tabData {
+	// Blocks are only refreshed while their tab is visible — no point feeding
+	// lists or repainting a chart hidden behind another tab every 500ms. Switching
+	// back re-runs refresh from layout, and the incremental sync fills in the rest.
+	switch a.tab {
+	case tabData:
 		a.setSummary(st)
 		a.setShip(st)
 		a.pumpFeeds(st)
+	case tabTrend:
+		a.setTrend(st)
 	}
 }
 
