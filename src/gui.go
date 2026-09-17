@@ -884,14 +884,20 @@ func (a *guiApp) drawTrend(dis *drawItemStruct) uintptr {
 	// The chart is GDI+ (anti-aliased) now; build a graphics on the item's HDC. If
 	// GDI+ is unavailable for some reason, fall back to a flat GDI fill so the tab
 	// is never left transparent.
-	g, ok := gpFromHDC(dis.HDC)
+	g, ok := gpFromHDC(dis.HDC, rc.Right-rc.Left, rc.Bottom-rc.Top, rc.Left, rc.Top)
 	if !ok {
 		fillRect(dis.HDC, &rc, getSysColorBrush(colorButtonFace))
 		return 1
 	}
 	defer g.Close()
 
-	ox, oy := rc.Left, rc.Top
+	// Offscreen double-buffer draws in local (0,0) coordinates; the rare direct
+	// fallback keeps the control-rect origin. rc.Left/Top are 0 for an owner-drawn
+	// child control either way, so the chart lands in the same place.
+	ox, oy := int32(0), int32(0)
+	if !g.offscreen {
+		ox, oy = rc.Left, rc.Top
+	}
 	st := snapshotStatus()
 	c := buildTrendChart(st.KillTrend, st.TrendWindowText, rc.Right-rc.Left, rc.Bottom-rc.Top)
 
