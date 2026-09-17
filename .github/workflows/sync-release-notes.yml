@@ -1,0 +1,43 @@
+name: Sync Release Notes
+
+# Keeps each published GitHub Release body in sync with the notes checked into
+# .github/release-notes/<tag>.md. Run it when those files change (or on demand)
+# to backfill or revise a release. Releases whose tag has no release yet are
+# skipped, so adding notes for a future version is harmless.
+#
+# Day-to-day releases get their notes from the annotated tag body (see
+# release.yml); this workflow is for backfilling and later edits.
+on:
+  push:
+    paths:
+      - ".github/release-notes/**"
+      - ".github/workflows/sync-release-notes.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply notes to existing releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          count=0
+          for f in .github/release-notes/*.md; do
+            tag="$(basename "$f" .md)"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "== updating $tag =="
+              gh release edit "$tag" --notes-file "$f"
+            else
+              echo "== skipping $tag (no release yet) =="
+            fi
+            count=$((count + 1))
+          done
+          echo "processed $count note file(s)"
