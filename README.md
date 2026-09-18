@@ -24,6 +24,8 @@ or while *not* playing:
 | **Alerts** | Shield drop and log silence, pushed through [WxPusher](https://wxpusher.zjiecode.com) — a third-party push service, not an official WeChat API. Repeated silence alerts are capped so an overnight disconnect cannot spam you |
 | **Ship info** | Current ship, name/ID, cargo, main and reserve fuel — recovered from older journals when the current one has no `Loadout` event yet |
 | **Web panel** | Live status, trend chart (inline SVG), bounty log, event stream. Served over the LAN, gzip-compressed, no build step, no CDN |
+| **Status bar** | One glance, no tab switching: HTTP state, a **clickable panel address** (opens the panel in your browser), total kills, kills in the last hour, mission progress, total bounty — same segments in the Win32 and Tk builds |
+| **Edge toolbar** *(Win32)* | Closing or minimizing collapses the window into a slim, rounded bar docked to the bottom of the screen, still showing the live status line. **Drag it** anywhere, **double-click** to bring the window back, right-click for the tray menu (`toolbar_edge`) |
 | **Bilingual UI** | 中文 / English, picked from the system locale by default and overridable in the config. Translations live in editable TOML files — adding a language needs no recompilation |
 | **Self-contained** | Single executable. No installer, no runtime, no DLLs, **no CGO** — the Tk build embeds Tcl/Tk 9.0 as pure Go |
 | **Editable config** | Plain TOML next to the executable, with the defaults documented inline |
@@ -34,7 +36,7 @@ Grab the artifact you want from [Releases](../../releases):
 
 | File | Platform | Notes |
 |---|---|---|
-| `elite_mon_win32.exe` | Windows | **Recommended.** Native Win32 UI — plain Win32 SDK, no third-party UI libraries. Follows the system visual theme; tray icon; closing the window minimizes to the tray |
+| `elite_mon_win32.exe` | Windows | **Recommended.** Native Win32 UI — plain Win32 SDK, no third-party UI libraries. Follows the system visual theme; tray icon; closing or minimizing collapses to a slim edge toolbar instead of disappearing |
 | `elite_mon_tk.exe` | Windows | Tk 9.0 UI. Useful if you prefer it; no DLLs to ship |
 | `elite_mon.exe` | Windows | Console build — no window, logs to stderr |
 | `elite_mon_tk_linux_amd64` | Linux | Tk UI |
@@ -217,6 +219,22 @@ viewport, so it looks the same on a phone as on a desktop.
 All variants share the monitoring core and the embedded frontend; only the two entry
 points differ (`startLogging` and `runUI`).
 
+### Edge toolbar (Win32 only)
+
+With `toolbar_edge = "bottom"` (the default), closing or minimizing the Win32 window
+does not just hide it — it turns into a small rounded bar docked to the screen edge,
+still printing the live status line:
+
+- **Drag** it anywhere on screen; it stays where you leave it.
+- **Double-click** it to bring the main window back. A single click does nothing, so a
+  stray click cannot pop the window open.
+- **Right-click** for the same menu as the tray icon.
+- Set `toolbar_edge = "top"` for the top edge, or `""` for the old behaviour (tray only).
+
+The Tk build has no system tray icon, so it has nothing to fall back on if the window
+is hidden — there closing the window exits, and `toolbar_edge` is ignored (a note is
+logged at startup).
+
 ## Language files
 
 Translations live in `src/lang/*.toml`, embedded into the binary and extracted to `lang/`
@@ -229,7 +247,8 @@ title = "ED Real-time Monitor Panel"
 ```
 
 To add a language, copy `lang/en.toml` to `lang/ja.toml`, set `code` / `tag` / `names`,
-and translate the `[strings]` tables. A Japanese machine then picks it up on its own:/nauto matches the system locale against every language's `tag`, so shipping
+and translate the `[strings]` tables. A Japanese machine then picks it up on its own:
+`auto` matches the system locale against every language's `tag`, so shipping
 `lang/ja.toml` is enough. Put `language = "ja"` in `config.toml` only to force it
 somewhere else. Any id you leave out falls back to the base language, so a
 half-finished translation still works.
