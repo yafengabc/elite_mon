@@ -89,6 +89,11 @@ jobs:
           # Release notes come from the annotated tag body written at tag time
           # (git tag -a vX.Y.Z -F notes.txt / -m "..."). Fall back to the
           # subject line when the tag has no body.
+          #
+          # After publishing, the body is edited by hand with gh:
+          #   gh release edit vX.Y.Z --notes-file notes.md   (or --notes "...")
+          # There is no workflow that rewrites it: .github/release-notes/ is an
+          # archive/draft folder only and is NEVER synced into a release.
           TAG_NOTES="$(git for-each-ref --format='%(contents:body)' "refs/tags/$GITHUB_REF_NAME")"
           if [ -z "$TAG_NOTES" ]; then
             TAG_NOTES="$(git for-each-ref --format='%(contents:subject)' "refs/tags/$GITHUB_REF_NAME")"
