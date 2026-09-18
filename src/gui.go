@@ -54,6 +54,10 @@ const (
 	idTrend   = 112 // tab 3: the trend chart (owner-drawn static)
 	idStatus  = 120
 
+	// Status bar part indices (the bar is filled from statusBarParts). The address is its own
+	// part because it is the only one that is drawn as a link and clicked.
+	statusLinkPart = 1
+
 	// Tabs
 	tabStatus = 0
 	tabData   = 1
@@ -233,10 +237,12 @@ func sanitizeForGDI(s string) string {
 // ------------------------------------------------------------------
 
 type guiApp struct {
-	hwnd     syscall.Handle
-	font     syscall.Handle
-	fontBold syscall.Handle // bold, for panel captions (summary / ship info …)
-	lineH    int32
+	hwnd        syscall.Handle
+	font        syscall.Handle
+	fontBold    syscall.Handle // bold, for panel captions (summary / ship info …)
+	fontLink    syscall.Handle // underlined, for the status bar's panel address (drawn as a link)
+	statusTheme syscall.Handle // theme handle for the status bar, opened lazily by drawLinkItem
+	lineH       int32
 
 	// The tab strip itself is the native control, no custom drawing; each page's
 	// controls are still shown / hidden as a group. The page content rect is
@@ -335,6 +341,11 @@ const (
 	// they are darkened to stay legible on it — same two hues, same pairing.
 	colRateLine = uint32(0x002A7A0E) // #0E7A2A kill rate (10 min, extrapolated)
 	colHourLine = uint32(0x00C05A00) // #005AC0 kills in the last hour
+
+	// The status bar's panel address is a link, so it gets the conventional link look: blue
+	// with an underline. Same blue as the chart's hour line, which keeps the palette to one
+	// accent; the underline carries the "this is clickable" half of the signal.
+	colLink = colHourLine
 )
 
 // ------------------------------------------------------------------
@@ -388,6 +399,7 @@ func runGUI() {
 
 	app.font = createUIFont()
 	app.fontBold = createUIFontBold()
+	app.fontLink = createUIFontLink()
 	app.lineH = textHeight(app.font) + 2
 	app.taskbarCreated = registerWindowMessage("TaskbarCreated")
 
@@ -592,6 +604,17 @@ func createUIFontBold() syscall.Handle {
 	return 0
 }
 
+// createUIFontLink is the same size and weight, underlined: the status bar's panel address is
+// rendered as a link, and DrawText cannot underline by itself.
+func createUIFontLink() syscall.Handle {
+	for _, name := range uiFontNames {
+		if f := createFontUnderline(-uiFontHeight, fwNormal, name); f != 0 {
+			return f
+		}
+	}
+	return 0
+}
+
 // ------------------------------------------------------------------
 // Window procedure
 // ------------------------------------------------------------------
@@ -629,6 +652,19 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		hdr := ptrFromArg[nmhdr](lParam)
 		if syscall.Handle(hdr.HwndFrom) == app.tabs && int32(hdr.Code) == tcnSelChange {
 			app.onTabChange()
+			return 0
+		}
+		// The status bar's address cell is a link: the app paints it blue and underlined
+		// (statusBarSetOwnerDraw + drawLinkItem), so a click on it must open the panel.
+		// NM_CLICK carries the clicked part index in its NMMOUSE payload, and part 1 is the
+		// address. Mouse notifications keep arriving for an owner-drawn part, which is why the
+		// click can stay on this path while the painting moved to WM_DRAWITEM.
+		if syscall.Handle(hdr.HwndFrom) == app.status {
+			if int32(hdr.Code) == nmClick {
+				if ptrFromArg[nmmouse](lParam).DwItemSpec == statusLinkPart {
+					app.openWeb()
+				}
+			}
 		}
 		return 0
 
@@ -641,6 +677,8 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 			return app.drawBountyItem(dis)
 		case idTrend:
 			return app.drawTrend(dis)
+		case idStatus:
+			return app.drawLinkItem(dis)
 		}
 
 	case wmSetCursor:
@@ -652,6 +690,12 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		// control (the handle observed here is the frame's own), so the decision
 		// comes from the cursor position against the chart's rectangle instead —
 		// see hoverTrend. Returning 0 lets the arrow cursor be set.
+		if app.overStatusLink() {
+			// Over the link: show the hand and claim the message, otherwise the default
+			// handling would put the arrow straight back (that is what returning 0 asks for).
+			setCursor(loadCursor(idcHand))
+			return 1
+		}
 		if app.tab == tabTrend {
 			app.hoverTrend()
 		}
@@ -701,11 +745,12 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case wmDestroy:
 		app.removeTray()
-		for _, f := range []syscall.Handle{app.font, app.fontBold} {
+		for _, f := range []syscall.Handle{app.font, app.fontBold, app.fontLink} {
 			if f != 0 {
 				deleteObject(f)
 			}
 		}
+		closeThemeData(app.statusTheme)
 		pPostQuitMessage.Call(0)
 		return 0
 	}
@@ -1091,9 +1136,13 @@ func (a *guiApp) layout() {
 	// ---- Bottom status bar: height follows the font, segment widths follow the window ----
 	sbarH := a.lineH + 8
 	moveWindow(a.status, 0, h-sbarH, w, sbarH)
-	// 4 segments: hint (takes the rest of the left) / listen port / LAN address / poll interval.
-	// The first three are right edges; -1 on the last means "extend to the right edge".
-	statusBarSetParts(a.status, []int32{w - 620, w - 480, w - 300, -1})
+	// 4 segments: HTTP state label (takes the rest of the left) / panel address (drawn as a
+	// link) / total kills / total bounty. The first three are right edges; -1 on the last means
+	// "extend to the right edge".
+	statusBarSetParts(a.status, []int32{w - 500, w - 330, w - 180, -1})
+	// The panel address is painted by the app (blue + underlined link), so that one segment
+	// switches the control into owner-draw mode. Idempotent, hence safe on every resize.
+	statusBarSetOwnerDraw(a.status, statusLinkPart)
 
 	// ---- Tab control ----
 	// How the tab strip looks is the theme's business; the content area below it comes from
@@ -1210,7 +1259,7 @@ func (a *guiApp) refresh() {
 	a.setInfo(a.buildInfo())
 	a.setState(st)
 	a.pumpLog()
-	a.setStatus()
+	a.setStatus(st)
 
 	// Blocks are only refreshed while their tab is visible — no point feeding
 	// lists or repainting a chart hidden behind another tab every 500ms. Switching
@@ -1243,25 +1292,86 @@ func (a *guiApp) setState(st AppStatus) {
 	setWindowText(a.state, text) // the text change repaints; the color comes from WM_CTLCOLORSTATIC
 }
 
-// setStatus refreshes the 4 status bar segments: hint / bound port / LAN address / poll
-// interval.
+// setStatus refreshes the 4 status bar segments: HTTP state / panel address / total kills /
+// total bounty.
 // The text is shared with the Tk build (statusBarParts). The status bar is a native control
 // updated per segment, and only segments that actually changed are rewritten — so the whole
 // bar isn't repainted every 500ms.
-func (a *guiApp) setStatus() {
-	hint := T("gui.close_hint_tray")
-	if !a.trayAdded {
-		hint = T("gui.tray_unavailable")
-	}
-	parts := statusBarParts(hint, a.lanAddr)
+func (a *guiApp) setStatus(st AppStatus) {
+	parts := statusBarParts(st)
 
 	for i, t := range parts {
 		if a.lastStat[i] == t {
 			continue
 		}
 		a.lastStat[i] = t
+		if i == statusLinkPart {
+			// The address cell is owner-drawn, so there is no text to hand the control: the
+			// painted string comes from lastStat (see drawLinkItem) and the cell only needs a
+			// repaint. The item value does not change, so the control may not invalidate the
+			// part by itself — do it here.
+			invalidateRect(a.status, nil)
+			continue
+		}
 		statusBarSetText(a.status, i, t)
 	}
+}
+
+// overStatusLink reports whether the cursor sits on the status bar's address cell — the link.
+// Like hoverTrend it hit-tests the cursor position rather than trusting WM_SETCURSOR's wParam,
+// which does not reliably name the window under the cursor. An empty cell (panel off) is not a
+// link, so it keeps the arrow.
+func (a *guiApp) overStatusLink() bool {
+	if a.status == 0 || a.lastStat[statusLinkPart] == "" {
+		return false
+	}
+	rc, ok := statusBarPartRect(a.status, statusLinkPart)
+	if !ok {
+		return false
+	}
+	pt := getCursorPos()
+	screenToClient(a.status, &pt)
+	return pt.X >= rc.Left && pt.X < rc.Right && pt.Y >= rc.Top && pt.Y < rc.Bottom
+}
+
+// drawLinkItem paints the status bar's address cell — segment 1, the one part switched to
+// owner-draw in layout. It is a link: blue and underlined, like the panel address on the data
+// panel, and clicking it opens the panel (see the NM_CLICK branch in wndProc).
+//
+// The themed pane is drawn first so the cell is indistinguishable from the parts the control
+// paints itself; without a theme (classic mode) it falls back to the button-face colour.
+func (a *guiApp) drawLinkItem(dis *drawItemStruct) uintptr {
+	// Identify the part by the sending control and the part index. DRAWITEMSTRUCT.CtlType is
+	// useless here: there is no ODT_STATUSBAR (the ODT_* set is menu/listbox/combobox/button/
+	// static/listview/tab/header), so a status bar leaves it at something that looks like another
+	// control type. HwndItem is the status bar itself, which cannot be confused.
+	if syscall.Handle(dis.HwndItem) != a.status || dis.ItemID != statusLinkPart {
+		return 1
+	}
+	if a.statusTheme == 0 {
+		a.statusTheme = openThemeData(a.status, "STATUS")
+	}
+	rc := dis.RcItem
+	if !drawThemeBackground(a.statusTheme, dis.HDC, sppNormal, &rc) {
+		fillRect(dis.HDC, &rc, getSysColorBrush(colorButtonFace))
+	}
+
+	url := a.lastStat[statusLinkPart]
+	if url == "" { // panel off: background only, the cell is empty
+		return 1
+	}
+	// Measured against the control's own rendering (SB_GETRECT + a screenshot): the theme insets
+	// each part's text 3px from the part rect, and the next part's separator sits in the 2px
+	// between rects. 2px here plus the ~1px left bearing of the first glyph lands the address on
+	// the same column as the neighbouring cells — with 5px it sat 3px further right.
+	rc.Left += 2
+	rc.Right -= 4
+	old := selectObject(dis.HDC, a.fontLink)
+	setTextColor(dis.HDC, colLink)
+	setBkMode(dis.HDC, transparent)
+	drawText(dis.HDC, url, &rc, dtLeft|dtVCenter|dtSingleLine|dtNoPrefix|dtEndEllipsis)
+	selectObject(dis.HDC, old)
+	return 1
 }
 
 // The two text blocks on tab 2 have hardcoded heights, so content changes need no re-layout,
@@ -1571,7 +1681,7 @@ func (a *guiApp) openWeb() {
 			T("gui.panel_disabled_title"), mbOK|mbIconInfo)
 		return
 	}
-	shellExecute("http://localhost" + portOf(cfg.ListenAddr))
+	shellExecute(panelURL())
 }
 
 // openPath opens with the system-associated program; on failure fall back to the containing

@@ -158,32 +158,36 @@ func lanURL() string {
 }
 
 // statusBarParts is the four shared bottom status-bar segments:
-// hint / listen port / LAN address / scan interval.
+// HTTP state label / panel address (a link) / total kills / total bounty.
 //
-// Shared by the Win32 and Tk builds so both UIs word states like "listen port" identically.
-// The content is fixed at runtime, so each GUI fills it once at startup.
-//
-// lan is passed in by the caller (both GUIs enumerate the NICs once at startup and cache
-// it) to avoid enumerating twice.
-func statusBarParts(hint, lan string) [4]string {
-	p := [4]string{
-		0: hint,
-		1: panelBarText(),
-		3: T("status.scan_interval", spanText(cfg.poll)),
+// Shared by the Win32 and Tk builds so both UIs word the bar identically. The label and the
+// address are separate cells because only the address is drawn as a link — blue, underlined and
+// clickable. Kills and bounty change while the program runs, so each GUI re-fills the bar on
+// its own refresh tick instead of once at startup.
+func statusBarParts(st AppStatus) [4]string {
+	label, link := panelBarCells()
+	return [4]string{
+		0: label,
+		1: link,
+		2: T("status.total_kills", st.TotalKills),
+		3: T("status.total_bounty", commas(st.TotalBounty)),
 	}
-	if lan != "" {
-		p[2] = T("status.lan", lan)
-	}
-	return p
 }
 
-// panelBarText is the status bar's port cell: the listen address when enabled, otherwise
-// an honest note (showing an address that isn't actually listening misleads the most).
-func panelBarText() string {
+// panelBarCells is the status bar's HTTP pair: the state label, and the address the panel can
+// be opened at. The second is empty while the panel is off — there is no address to show, and
+// the disabled state is already spelled out by the first.
+func panelBarCells() (label, link string) {
 	if !cfg.EnablePanel {
-		return T("status.panel_off")
+		return T("status.panel_off"), ""
 	}
-	return T("status.listening", cfg.ListenAddr)
+	return T("status.http_running"), panelURL()
+}
+
+// panelURL is where the panel is reachable on this machine. Built from portOf() so the
+// displayed address always matches the bound port — never the raw bind address.
+func panelURL() string {
+	return "http://localhost" + portOf(cfg.ListenAddr)
 }
 
 // stateText builds the status-line text; the second result says whether to paint it red

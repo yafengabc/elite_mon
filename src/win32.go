@@ -29,6 +29,7 @@ var (
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
 	comctl32 = syscall.NewLazyDLL("comctl32.dll")
+	uxtheme  = syscall.NewLazyDLL("uxtheme.dll")
 )
 
 var (
@@ -66,6 +67,7 @@ var (
 	pSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
 	pRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 	pDrawTextW              = user32.NewProc("DrawTextW")
+	pSetCursor              = user32.NewProc("SetCursor")
 	pFillRect               = user32.NewProc("FillRect")
 	pDrawEdge               = user32.NewProc("DrawEdge")
 	pInvalidateRect         = user32.NewProc("InvalidateRect")
@@ -95,6 +97,12 @@ var pGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 var (
 	pShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
 	pShellExecuteW    = shell32.NewProc("ShellExecuteW")
+)
+
+var (
+	pOpenThemeData       = uxtheme.NewProc("OpenThemeData")
+	pCloseThemeData      = uxtheme.NewProc("CloseThemeData")
+	pDrawThemeBackground = uxtheme.NewProc("DrawThemeBackground")
 )
 
 // ------------------------------------------------------------------
@@ -161,15 +169,18 @@ const (
 	lbSetItemData   = 0x019A
 	lbSetItemHeight = 0x01A0
 
-	dtLeft        = 0x00000000
-	dtCenter      = 0x00000001
-	dtRight       = 0x00000002
-	dtVCenter     = 0x00000004
-	dtWordBreak   = 0x00000010
-	dtSingleLine  = 0x00000020
-	dtCalcRect    = 0x00000400
-	dtNoPrefix    = 0x00000800
-	dtEndEllipsis = 0x00004000
+	dtLeft       = 0x00000000
+	dtCenter     = 0x00000001
+	dtRight      = 0x00000002
+	dtVCenter    = 0x00000004
+	dtWordBreak  = 0x00000010
+	dtSingleLine = 0x00000020
+	dtCalcRect   = 0x00000400
+	dtNoPrefix   = 0x00000800
+	// ⚠️ DT_END_ELLIPSIS is 0x8000. 0x4000 is DT_PATH_ELLIPSIS ("keep the tail, ellipsis in the
+	// middle"), which is what this constant used to hold under the END name — it truncated plain
+	// text as if it were a file path.
+	dtEndEllipsis = 0x00008000
 
 	// DrawEdge: classic 3D borders (combinations of BDR_*)
 	edgeRaised = 0x0005 // BDR_RAISEDOUTER | BDR_RAISEDINNER
@@ -196,6 +207,7 @@ const (
 
 	idiApplication = 32512
 	idcArrow       = 32512
+	idcHand        = 32649 // the "this is a link" cursor, shown over the status bar address cell
 
 	// Resource IDs of the program icon (src/icon/app.ico) once compiled into the exe.
 	//
@@ -269,6 +281,16 @@ const (
 	tcnFirst     = -550
 	tcnSelChange = tcnFirst - 1 // -551: tab change notification (delivered via WM_NOTIFY)
 
+	// nmFirst = 0 and these are counted down from it, so they arrive as negative codes;
+	// compare int32(hdr.Code) against them, never the unsigned value.
+	nmClick = -2 // NM_FIRST - 2: a status bar sends it with the clicked part in NMMOUSE
+
+	// ⚠️ No NM_CUSTOMDRAW, on purpose — the status bar does not implement custom draw. MSDN's
+	// NM_CUSTOMDRAW page lists the controls that do (header, list view, rebar, toolbar, tooltip,
+	// trackbar, tree view, plus buttons under a v6 manifest) and the status bar is not among
+	// them, so a handler for it is never called however textbook its body looks. A part that
+	// needs custom painting has to be switched to SBT_OWNERDRAW instead (see drawLinkItem).
+
 	tcifText = 0x0001
 
 	wmNotify = 0x004E
@@ -277,6 +299,16 @@ const (
 	sbarsSizeGrip = 0x0100
 	sbSetParts    = 0x0404 // WM_USER + 4
 	sbSetTextW    = 0x040B // WM_USER + 11
+	sbGetRect     = 0x040A // WM_USER + 10: the part's rectangle, in the control's client coords
+	sbtOwnerDraw  = 0x1000 // SB_SETTEXT flag: the parent draws this part, via WM_DRAWITEM
+
+	// ⚠️ No ODT_STATUSBAR: the ODT_* family is menu/listbox/combobox/button/static/listview/
+	// tab/header. A status bar part's DRAWITEMSTRUCT has to be identified by CtlID / HwndItem.
+
+	// The status bar theme (uxtheme). SPP_NORMAL is the pane: drawing it into an owner-drawn
+	// part reproduces exactly what the theme would have painted there itself, so the part does
+	// not stand out from its themed neighbours.
+	sppNormal = 1
 )
 
 // ------------------------------------------------------------------
@@ -368,6 +400,17 @@ type nmhdr struct {
 	IdFrom   uintptr
 	Code     int32
 	_        int32 // padding: same size as Win32's NMHDR (24 bytes on x64)
+}
+
+// nmmouse is NMMOUSE: what NM_CLICK / NM_DBLCLK from a status bar actually point at (the
+// notification is laid out as NMHDR + the fields below). DwItemSpec carries the index of the
+// clicked status-bar part, which is how the HTTP cell is turned into a link.
+type nmmouse struct {
+	Hdr        nmhdr
+	DwItemSpec uintptr
+	DwItemData uintptr
+	Pt         pointT
+	DwHitInfo  uintptr
 }
 
 // tcItemW is TCITEMW, used to insert a tab (only the text is filled in, the rest is for
@@ -475,6 +518,13 @@ func releaseDC(hwnd, hdc syscall.Handle) {
 func loadCursor(id uintptr) syscall.Handle {
 	r, _, _ := pLoadCursorW.Call(0, id)
 	return syscall.Handle(r)
+}
+
+// setCursor makes cur the cursor until another SetCursor (or the default handling of the next
+// WM_SETCURSOR) replaces it; the caller must return TRUE from WM_SETCURSOR or the default
+// handling puts the arrow straight back.
+func setCursor(cur syscall.Handle) {
+	pSetCursor.Call(uintptr(cur))
 }
 
 // loadIcon fetches a system-provided icon (hInstance 0 selects the IDI_* set).
@@ -622,6 +672,60 @@ func statusBarSetText(sb syscall.Handle, part int, text string) {
 	runtime.KeepAlive(p)
 }
 
+// statusBarSetOwnerDraw switches segment part to owner-draw: the control stops painting that
+// part itself and sends the parent a WM_DRAWITEM for it instead.
+//
+// The status bar is the one common control where this is the *only* way to a custom-painted
+// part — it has no custom draw at all (see the note on nmClick), so the link look cannot be
+// done by restyling the control's own text. SB_SETTEXT with SBT_OWNERDRAW hands the control a
+// 32-bit item value in place of the text, so the string is not stored in the control; it stays
+// on the app and is painted from there. Consequently SB_GETTEXT cannot read this part back — it
+// returns the item value, not text (the verification scripts know this).
+func statusBarSetOwnerDraw(sb syscall.Handle, part int) {
+	if sb == 0 {
+		return
+	}
+	sendMessage(sb, sbSetTextW, uintptr(part|sbtOwnerDraw), 0)
+}
+
+// statusBarPartRect reads back part's rectangle in the control's client coordinates; false
+// means the control refused (the part does not exist).
+func statusBarPartRect(sb syscall.Handle, part int) (rectT, bool) {
+	var rc rectT
+	if sb == 0 {
+		return rc, false
+	}
+	r, _, _ := pSendMessageW.Call(uintptr(sb), sbGetRect, uintptr(part),
+		uintptr(unsafe.Pointer(&rc)))
+	return rc, r != 0
+}
+
+// openThemeData opens the theme handle for a window's class; 0 means theming is off (classic
+// mode), and the caller falls back to system colours.
+func openThemeData(hwnd syscall.Handle, class string) syscall.Handle {
+	p := utf16Ptr(class)
+	r, _, _ := pOpenThemeData.Call(uintptr(hwnd), uintptr(unsafe.Pointer(p)))
+	runtime.KeepAlive(p)
+	return syscall.Handle(r)
+}
+
+func closeThemeData(htheme syscall.Handle) {
+	if htheme != 0 {
+		pCloseThemeData.Call(uintptr(htheme))
+	}
+}
+
+// drawThemeBackground paints one part of a control in its normal state; false means the theme
+// did not draw (no theme handle, or the part is unknown), so the caller must fall back.
+func drawThemeBackground(htheme, hdc syscall.Handle, part int32, rc *rectT) bool {
+	if htheme == 0 {
+		return false
+	}
+	r, _, _ := pDrawThemeBackground.Call(uintptr(htheme), uintptr(hdc), uintptr(part), 0,
+		uintptr(unsafe.Pointer(rc)), 0)
+	return int32(r) == 0 // S_OK
+}
+
 func drawEdge(hdc syscall.Handle, rc *rectT, edge, flags uint32) {
 	pDrawEdge.Call(uintptr(hdc), uintptr(unsafe.Pointer(rc)), uintptr(edge), uintptr(flags))
 }
@@ -674,6 +778,19 @@ func createFontEx(height int32, weight uint32, name string) syscall.Handle {
 
 func createFont(height int32, name string) syscall.Handle {
 	return createFontEx(height, fwNormal, name)
+}
+
+// createFontUnderline builds the same font with lfUnderline set. The status bar draws its panel
+// address as a link, and DrawText has no underline flag — the underline has to come from the
+// font itself.
+func createFontUnderline(height int32, weight uint32, name string) syscall.Handle {
+	p := utf16Ptr(name)
+	r, _, _ := pCreateFontW.Call(
+		uintptr(height), 0, 0, 0, uintptr(weight), 0, 1, 0, // arg 7 = fdwUnderline
+		uintptr(defaultCS), 0, 0, uintptr(cleartypeQuality), 0,
+		uintptr(unsafe.Pointer(p)))
+	runtime.KeepAlive(p)
+	return syscall.Handle(r)
 }
 
 func selectObject(hdc, obj syscall.Handle) syscall.Handle {
