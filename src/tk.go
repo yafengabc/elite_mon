@@ -200,9 +200,10 @@ grid .nb.t.c -row 0 -column 0 -sticky nsew -padx 6 -pady 2
 grid rowconfigure .nb.t 0 -weight 1
 grid columnconfigure .nb.t 0 -weight 1
 
-# ---- Bottom status bar (panel port / LAN / poll interval), same content as the Win32 build ----
+# ---- Bottom status bar (HTTP state / panel address / kills / bounty), same content as Win32 ----
 # Placed below the button row: buttons are the window's actions, the status bar is the window's state.
-# The text is fixed at runtime; the Go side fills it once in runTk (statusBarParts).
+# Cells change at runtime (kills and bounty keep counting), so the Go side refills them every
+# refresh tick (tkStatusBar).
 ttk::separator .sbline -orient horizontal
 grid .sbline -row 3 -column 0 -sticky ew -pady 0
 ttk::frame .sb
@@ -210,13 +211,39 @@ grid .sb -row 4 -column 0 -sticky ew -padx 8 -pady 3
 foreach p {p0 p1 p2 p3} {
 	ttk::label .sb.$p -text "" -anchor w -font TkTextFont
 }
+# The panel address is a link: blue plus underline. ttk ignores -foreground, so the colour goes
+# through a style; the underline needs a font of its own, derived from TkTextFont via
+# [font actual] so it inherits the theme's family and size instead of naming a font (a bare
+# "TkTextFont 10" string is read as a family name and silently falls back to SimSun).
+font create SbLinkFont -family [font actual TkTextFont -family] -size [font actual TkTextFont -size] -underline 1
+ttk::style configure Link.TLabel -foreground #005AC0
+.sb.p1 configure -font SbLinkFont -style Link.TLabel
 grid .sb.p0 -row 0 -column 0 -sticky ew -padx 6
 grid .sb.p1 -row 0 -column 1 -sticky w -padx 6
 grid .sb.p2 -row 0 -column 2 -sticky w -padx 6
 grid .sb.p3 -row 0 -column 3 -sticky w -padx 6
-grid columnconfigure .sb 0 -weight 1
+# Bounty (p3) fills the right edge, matching the Win32 status bar's last segment (-1); the
+# other cells keep their natural width and pack left, so the address (p1) sits right after the
+# state label and is a stable, clickable target.
+grid columnconfigure .sb 3 -weight 1
 `)
 	return b.String()
+}
+
+// tkStatLast caches what the bottom status bar currently shows so the per-tick refresh only
+// talks to Tcl about cells that actually changed (kills / bounty tick over slowly).
+var tkStatLast [4]string
+
+// tkStatusBar fills the bottom status bar: HTTP state / panel address / total kills / total
+// bounty. Content comes from the same shared source as the Win32 build (statusBarParts).
+func tkStatusBar(st AppStatus) {
+	for i, txt := range statusBarParts(st) {
+		if tkStatLast[i] == txt {
+			continue
+		}
+		tkStatLast[i] = txt
+		tkSetLabel(fmt.Sprintf(".sb.p%d", i), txt)
+	}
 }
 
 // tkRefresh runs on the Tk event-loop thread (self-rescheduled every 500ms via
@@ -230,6 +257,9 @@ func tkRefresh() {
 	}()
 
 	st := snapshotStatus()
+
+	// Bottom status bar (panel state / total kills / total bounty)
+	tkStatusBar(st)
 
 	// Top "updated at"
 	tkSetVar("::tkbuf", T("status.updated", st.UpdatedAt))
@@ -499,6 +529,18 @@ func tkOpen(target string) {
 	}
 }
 
+// openPanel opens the web panel with the system browser. The "open web" button and a click on
+// the status bar's HTTP cell (which shows the address) both land here, so the disabled case is
+// explained in exactly one place — a dead click shouldn't read as a broken app.
+func openPanel() {
+	if !cfg.EnablePanel {
+		tkEval(`tk_messageBox -title "` + T("gui.panel_disabled_title") + `" -icon info ` +
+			`-message "` + T("gui.panel_disabled_msg") + `"`)
+		return
+	}
+	tkOpen(panelURL())
+}
+
 // runTk initializes Tcl/Tk (tk9.0 unpacks the runtime into the user cache dir),
 // builds the window and enters the event loop. Closing the window triggers the
 // WmProtocol callback, which os.Exit()s directly.
@@ -531,33 +573,26 @@ func runTk() {
 	btns := TFrame()
 	Grid(btns, In(App), Row(2), Column(0), Sticky("ew"), Padx(8), Pady(6))
 	btnCfg := btns.TButton(Txt(T("gui.open_config")), Command(func() { tkOpen(configPath()) }))
-	btnWeb := btns.TButton(Txt(T("gui.open_web")), Command(func() {
-		if !cfg.EnablePanel {
-			// Panel disabled by config: explain it, so a dead click isn't mistaken for
-			// a broken app
-			tkEval(`tk_messageBox -title "` + T("gui.panel_disabled_title") + `" -icon info ` +
-				`-message "` + T("gui.panel_disabled_msg") + `"`)
-			return
-		}
-		tkOpen("http://localhost" + portOf(cfg.ListenAddr))
-	}))
+	btnWeb := btns.TButton(Txt(T("gui.open_web")), Command(func() { openPanel() }))
 	btnExit := btns.TButton(Txt(T("gui.exit")), Command(func() { os.Exit(0) }))
 	Grid(btnCfg, In(btns), Row(0), Column(0), Padx(6))
 	Grid(btnWeb, In(btns), Row(0), Column(1), Padx(6))
 	Grid(btnExit, In(btns), Row(0), Column(2), Padx(6))
 
-	// Bottom status bar text: same shared source as Win32 (statusBarParts), filled once —
-	// it never changes at runtime.
-	sbParts := statusBarParts(T("gui.close_exits"), lanURL())
-	for i, txt := range sbParts {
-		tkSetLabel(fmt.Sprintf(".sb.p%d", i), txt)
-	}
+	// Bottom status bar: same shared source as the Win32 build (statusBarParts). Filled here
+	// for the first time so the bar isn't blank until the first refresh tick, then kept up to
+	// date by tkStatusBar inside tkRefresh.
+	tkStatusBar(snapshotStatus())
 
 	// Chart hover: the canvas reports pointer movement, and the handler redraws with
 	// the readout. Bind takes the canvas path as a tag and Command wraps a
 	// func(*Event), the same pair the buttons use above — no custom Tcl command.
 	Bind(tkTrendCanvas, "<Motion>", Command(tkTrendMotion))
 	Bind(tkTrendCanvas, "<Leave>", Command(tkTrendLeave))
+
+	// The status bar's address cell is a link (blue, underlined — see the Link.TLabel style and
+	// SbLinkFont in the UI script): clicking it opens the panel, the same action as the button.
+	Bind(".sb.p1", "<Button-1>", Command(func(*Event) { openPanel() }))
 
 	// Window icon: largest first (the order Tk docs recommend).
 	// Must happen before App.Wait() — if Wait finds no icon set, it installs a default
