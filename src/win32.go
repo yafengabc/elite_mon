@@ -55,6 +55,7 @@ var (
 	pLoadIconW              = user32.NewProc("LoadIconW")
 	pLoadImageW             = user32.NewProc("LoadImageW")
 	pGetSystemMetrics       = user32.NewProc("GetSystemMetrics")
+	pSystemParametersInfoW  = user32.NewProc("SystemParametersInfoW")
 	pMessageBoxW            = user32.NewProc("MessageBoxW")
 	pCreatePopupMenu        = user32.NewProc("CreatePopupMenu")
 	pCreateMenu             = user32.NewProc("CreateMenu")
@@ -75,6 +76,13 @@ var (
 	pEndPaint               = user32.NewProc("EndPaint")
 	pGetSysColor            = user32.NewProc("GetSysColor")
 	pGetSysColorBrush       = user32.NewProc("GetSysColorBrush")
+	pSetWindowRgn           = user32.NewProc("SetWindowRgn")
+	pGetWindowRect          = user32.NewProc("GetWindowRect")
+	pReleaseCapture         = user32.NewProc("ReleaseCapture")
+	pGetWindowLongPtrW      = user32.NewProc("GetWindowLongPtrW")
+	pSetWindowLongPtrW      = user32.NewProc("SetWindowLongPtrW")
+	pCallWindowProcW        = user32.NewProc("CallWindowProcW")
+	pGetParent              = user32.NewProc("GetParent")
 )
 
 var (
@@ -88,6 +96,7 @@ var (
 	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
 	pBitBlt                 = gdi32.NewProc("BitBlt")
 	pDeleteDC               = gdi32.NewProc("DeleteDC")
+	pCreateRoundRectRgn     = gdi32.NewProc("CreateRoundRectRgn")
 )
 
 var pInitCommonControlsEx = comctl32.NewProc("InitCommonControlsEx")
@@ -111,29 +120,40 @@ var (
 
 const (
 	wsOverlappedWindow = 0x00CF0000
+	wsPopup            = 0x80000000
 	wsChild            = 0x40000000
 	wsVisible          = 0x10000000
 	wsVScroll          = 0x00200000
 	wsBorder           = 0x00800000
 
 	wsExClientEdge = 0x00000200
+	wsExTopMost    = 0x00000008 // the edge toolbar stays above other windows
+	wsExToolWindow = 0x00000080 // keeps the toolbar out of the taskbar / alt-tab
+	wsExNoActivate = 0x08000000 // clicks on the toolbar restore the main window without stealing focus
 
 	swHide = 0
 	swShow = 5
 
 	csHRedraw = 0x0002
 	csVRedraw = 0x0001
+	csDblClk  = 0x0008 // class wants WM_LBUTTONDBLCLK (the edge toolbar restores on double-click)
+
+	// SetWindowLongPtr indices
+	gwlpWndProc  = -4
+	gwlpUserData = -21
 
 	// Window messages
 	wmDestroy        = 0x0002
 	wmSize           = 0x0005
 	wmPaint          = 0x000F
 	wmClose          = 0x0010
+	wmEraseBkgnd     = 0x0014
 	wmLButtonDown    = 0x0201
 	wmQuit           = 0x0012
 	wmGetMinMaxInfo  = 0x0024
 	wmDrawItem       = 0x002B
 	wmCommand        = 0x0111
+	wmSysCommand     = 0x0112 // the _ (minimize) button arrives here as SC_MINIMIZE
 	wmTimer          = 0x0113
 	wmSetCursor      = 0x0020
 	wmMouseMove      = 0x0200
@@ -145,6 +165,15 @@ const (
 	wmLButtonUp     = 0x0202
 	wmLButtonDblClk = 0x0203
 	wmRButtonUp     = 0x0205
+
+	// WM_SYSCOMMAND wParam values (the four low bits are reserved by Windows; mask with 0xFFF0)
+	scMinimize = 0xF020 // the _ (minimize) button
+
+	// Dragging a frameless window: re-dispatch WM_LBUTTONDOWN as a caption click (HTCAPTION) so
+	// the system moves the window; WM_EXITSIZEMOVE fires when the drag finishes.
+	wmNcLButtonDown = 0x00A1
+	wmExitSizeMove  = 0x0232
+	htCaption       = 2
 
 	ssLeft           = 0x00000000
 	ssLeftNoWordWrap = 0x0000000C
@@ -227,9 +256,13 @@ const (
 	lrDefaultSize = 0x0000
 	lrShared      = 0x8000
 	smCxIcon      = 11 // GetSystemMetrics: large icon width
-	smCyIcon      = 12 // large icon height
-	smCxSmIcon    = 49 // small icon width
-	smCySmIcon    = 50 // small icon height
+	smCxScreen    = 0  // GetSystemMetrics: primary monitor width
+	smCyScreen    = 1  // GetSystemMetrics: primary monitor height
+
+	spiGetWorkArea = 0x0030 // SystemParametersInfo: the work area (excludes the taskbar)
+	smCyIcon       = 12     // large icon height
+	smCxSmIcon     = 49     // small icon width
+	smCySmIcon     = 50     // small icon height
 
 	mfString    = 0x00000000
 	mfPopup     = 0x00000010
@@ -537,6 +570,14 @@ func loadIcon(id uintptr) syscall.Handle {
 func getSystemMetrics(index int32) int32 {
 	r, _, _ := pGetSystemMetrics.Call(uintptr(index))
 	return int32(r)
+}
+
+// systemParametersInfo wraps SystemParametersInfoW. Used here to read the primary monitor's
+// work area (SPI_GETWORKAREA) so the edge toolbar can sit just inside the screen without
+// covering the taskbar.
+func systemParametersInfo(uiAction, uiParam uint32, pv uintptr, fWinIni uint32) bool {
+	r, _, _ := pSystemParametersInfoW.Call(uintptr(uiAction), uintptr(uiParam), pv, uintptr(fWinIni))
+	return r != 0
 }
 
 // loadImageIcon pulls an icon of the given pixel size from this exe's resources; 0 if absent.
@@ -863,6 +904,62 @@ func textHeight(hfont syscall.Handle) int32 {
 func getModuleHandle() syscall.Handle {
 	r, _, _ := pGetModuleHandleW.Call(0)
 	return syscall.Handle(r)
+}
+
+// createRoundRectRgn builds a rounded-rectangle region in window (client) coordinates.
+func createRoundRectRgn(left, top, right, bottom, ellipseW, ellipseH int32) syscall.Handle {
+	r, _, _ := pCreateRoundRectRgn.Call(uintptr(left), uintptr(top), uintptr(right), uintptr(bottom),
+		uintptr(ellipseW), uintptr(ellipseH))
+	return syscall.Handle(r)
+}
+
+// setWindowRgn clips a window to the given region. On success Windows takes ownership of the
+// region (the caller must NOT delete it); on failure the caller still owns it and must delete it.
+// Note: SetWindowRgn has no W/A variant -- it is exported as plain "SetWindowRgn".
+func setWindowRgn(hwnd, hrgn syscall.Handle, redraw bool) bool {
+	var r uintptr
+	if redraw {
+		r, _, _ = pSetWindowRgn.Call(uintptr(hwnd), uintptr(hrgn), 1)
+	} else {
+		r, _, _ = pSetWindowRgn.Call(uintptr(hwnd), uintptr(hrgn), 0)
+	}
+	return r != 0
+}
+
+// getWindowRect returns a window's bounding rectangle in screen coordinates.
+func getWindowRect(hwnd syscall.Handle) rectT {
+	var r rectT
+	pGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&r)))
+	return r
+}
+
+// releaseCapture releases the mouse capture, required before re-dispatching a click as a caption
+// drag so the system actually moves the window.
+func releaseCapture() {
+	pReleaseCapture.Call()
+}
+
+// getParent returns the parent (owner) window of hwnd, or 0.
+func getParent(hwnd syscall.Handle) syscall.Handle {
+	r, _, _ := pGetParent.Call(uintptr(hwnd))
+	return syscall.Handle(r)
+}
+
+// getWindowLongPtr / setWindowLongPtr read/write the 64-bit window long at index.
+func getWindowLongPtr(hwnd syscall.Handle, index int32) uintptr {
+	r, _, _ := pGetWindowLongPtrW.Call(uintptr(hwnd), uintptr(index))
+	return r
+}
+
+func setWindowLongPtr(hwnd syscall.Handle, index int32, value uintptr) uintptr {
+	r, _, _ := pSetWindowLongPtrW.Call(uintptr(hwnd), uintptr(index), value)
+	return r
+}
+
+// callWindowProc invokes a previous window procedure (used by the toolbar status bar subclass).
+func callWindowProc(prevWndProc uintptr, hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+	r, _, _ := pCallWindowProcW.Call(prevWndProc, uintptr(hwnd), uintptr(msg), wParam, lParam)
+	return r
 }
 
 func shellNotifyIcon(action uint32, nid *notifyIconDataW) bool {

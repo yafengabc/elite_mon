@@ -117,6 +117,7 @@ stall_threshold = "10m"
 stat_window = "1h"
 max_list_len = 200
 history_scan_count = 5
+toolbar_edge = "bottom"
 
 [wxpusher]
   url = "https://wxpusher.zjiecode.com/api/send/message"
@@ -164,6 +165,7 @@ history_scan_count = 5
 | `stat_window` | `"1h"` | 「最近 N」统计所用的窗口 |
 | `max_list_len` | `200` | 单次接口调用最多返回的记录条数 |
 | `history_scan_count` | `5` | 舰船数据缺失时回溯的历史日志份数 |
+| `toolbar_edge` | `"bottom"` | **仅 Win32 界面支持。** 最小化时收成一条居中的圆角窄工具条，贴屏幕「底/顶」边，可按住拖动到任意位置，双击恢复主窗口（仍保留托盘图标）；留空则维持原行为，仅收进托盘。Tk 界面不支持此项，配置后会在日志中提示已忽略 |
 | `wxpusher.url` | WxPusher 接口 | 推送服务地址，一般不用改 |
 | `wxpusher.app_token` | — | 你的 WxPusher 应用令牌（留空 = 不推送） |
 | `wxpusher.uid` | — | 你的 WxPusher 用户 UID（留空 = 不推送） |

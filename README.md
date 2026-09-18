@@ -126,6 +126,7 @@ stall_threshold = "10m"
 stat_window = "1h"
 max_list_len = 200
 history_scan_count = 5
+toolbar_edge = "bottom"
 
 [wxpusher]
   url = "https://wxpusher.zjiecode.com/api/send/message"
@@ -174,7 +175,8 @@ long AFK session, raise it to `"30m"` or `"1h"`.
 | `stall_threshold` | `"10m"` | Push an alert once the journal has been silent this long |
 | `stat_window` | `"1h"` | Window used for the "last N" statistics |
 | `max_list_len` | `200` | Maximum records returned per API call |
-| `history_scan_count` | `5` | Historical journals to scan when ship data is missing |
+| `history_scan_count` | `5` | Historical journals to scan when ship data missing |
+| `toolbar_edge` | `"bottom"` | **Win32 UI only.** On minimize, dock a thin (centred, text-width, rounded) toolbar to the screen bottom/top edge; draggable anywhere, double-click restores the main window (tray icon kept); empty = original tray-only behaviour. The Tk UI ignores this and logs a note when it is set |
 | `wxpusher.url` | WxPusher endpoint | Push service endpoint; rarely needs changing |
 | `wxpusher.app_token` | — | Your WxPusher app token (empty = no push) |
 | `wxpusher.uid` | — | Your WxPusher user UID (empty = no push) |

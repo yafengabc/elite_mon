@@ -157,22 +157,38 @@ func lanURL() string {
 	return ""
 }
 
-// statusBarParts is the five shared bottom status-bar segments:
-// HTTP state label / panel address (a link) / total kills / mission progress / total bounty.
+// statusBarParts is the shared bottom status-bar segments:
+// HTTP state label / panel address (a link) / total kills / kills in the last hour /
+// mission progress / total bounty.
 //
 // Shared by the Win32 and Tk builds so both UIs word the bar identically. The label and the
 // address are separate cells because only the address is drawn as a link — blue, underlined and
 // clickable. Kills, mission progress and bounty change while the program runs, so each GUI
 // re-fills the bar on its own refresh tick instead of once at startup.
-func statusBarParts(st AppStatus) [5]string {
+//
+// The "kills in the last hour" cell uses the trend's last cell KillsHour rather than AppStatus.
+// HourKills: HourKills follows stat_window (default 1h, but configurable to e.g. 30m), whereas
+// the panel's "最近 1 小时击杀" is the trend's rolling 1-hour count — so the status bar mirrors
+// the panel exactly regardless of the stats-window setting.
+func statusBarParts(st AppStatus) [6]string {
 	label, link := panelBarCells()
-	return [5]string{
+	return [6]string{
 		0: label,
 		1: link,
 		2: T("status.total_kills", st.TotalKills),
-		3: T("status.missions", st.MissionDone, st.MissionTotal),
-		4: T("status.total_bounty", commas(st.TotalBounty)),
+		3: T("status.kills_hour", lastKillsHour(st)),
+		4: T("status.missions", st.MissionDone, st.MissionTotal),
+		5: T("status.total_bounty", commas(st.TotalBounty)),
 	}
+}
+
+// lastKillsHour is the rolling 1-hour kill count from the most recent trend cell — the same
+// number the web panel shows as "最近 1 小时击杀". Returns 0 when no trend data exists yet.
+func lastKillsHour(st AppStatus) int {
+	if n := len(st.KillTrend); n > 0 {
+		return st.KillTrend[n-1].KillsHour
+	}
+	return 0
 }
 
 // panelBarCells is the status bar's HTTP pair: the state label, and the address the panel can

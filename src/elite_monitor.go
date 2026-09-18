@@ -151,6 +151,14 @@ type Config struct {
 	MaxListLen       int    `toml:"max_list_len"`       // max records returned per API call
 	HistoryScanCount int    `toml:"history_scan_count"` // journals to re-scan when ship data is missing
 
+	// Toolbar mode: "top" or "bottom" docks a thin status toolbar to that screen edge when the
+	// window is minimized (the tray icon is still kept, so the window is always recoverable).
+	// Empty ("") keeps the original behaviour: minimize only collapses to the tray.
+	// Win32 UI only -- the Tk UI ignores this and logs a note when it is set: the toolbar needs
+	// the tray icon as a fallback and window regions for its rounded corners, neither of which
+	// Tk provides.
+	ToolbarEdge string `toml:"toolbar_edge"`
+
 	// WxPusher is a third-party push service (wxpusher.zjiecode.com), not an
 	// official WeChat API. Alerts are delivered to WeChat through the service
 	// account you bind on their side.
@@ -180,6 +188,7 @@ func defaultConfig() Config {
 		StatWindow:       "1h",
 		MaxListLen:       200,
 		HistoryScanCount: 5,
+		ToolbarEdge:      "bottom",
 	}
 
 	c.WxPusher.URL = defaultWxPusherURL
@@ -201,6 +210,10 @@ func (c *Config) normalize() {
 	}
 	if c.HistoryScanCount <= 0 {
 		c.HistoryScanCount = 5
+	}
+	if c.ToolbarEdge != "" && c.ToolbarEdge != "top" && c.ToolbarEdge != "bottom" {
+		log.Printf("invalid toolbar_edge %q, falling back to \"bottom\"", c.ToolbarEdge)
+		c.ToolbarEdge = "bottom"
 	}
 	if c.WxPusher.URL == "" {
 		c.WxPusher.URL = defaultWxPusherURL
