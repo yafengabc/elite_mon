@@ -157,20 +157,21 @@ func lanURL() string {
 	return ""
 }
 
-// statusBarParts is the four shared bottom status-bar segments:
-// HTTP state label / panel address (a link) / total kills / total bounty.
+// statusBarParts is the five shared bottom status-bar segments:
+// HTTP state label / panel address (a link) / total kills / mission progress / total bounty.
 //
 // Shared by the Win32 and Tk builds so both UIs word the bar identically. The label and the
 // address are separate cells because only the address is drawn as a link — blue, underlined and
-// clickable. Kills and bounty change while the program runs, so each GUI re-fills the bar on
-// its own refresh tick instead of once at startup.
-func statusBarParts(st AppStatus) [4]string {
+// clickable. Kills, mission progress and bounty change while the program runs, so each GUI
+// re-fills the bar on its own refresh tick instead of once at startup.
+func statusBarParts(st AppStatus) [5]string {
 	label, link := panelBarCells()
-	return [4]string{
+	return [5]string{
 		0: label,
 		1: link,
 		2: T("status.total_kills", st.TotalKills),
-		3: T("status.total_bounty", commas(st.TotalBounty)),
+		3: T("status.missions", st.MissionDone, st.MissionTotal),
+		4: T("status.total_bounty", commas(st.TotalBounty)),
 	}
 }
 

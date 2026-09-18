@@ -279,7 +279,7 @@ type guiApp struct {
 	logNext   uint64
 	lastInfo  string
 	lastState string
-	lastStat  [4]string
+	lastStat  [5]string
 	stateErr  bool
 
 	lastSummary string
@@ -1136,10 +1136,10 @@ func (a *guiApp) layout() {
 	// ---- Bottom status bar: height follows the font, segment widths follow the window ----
 	sbarH := a.lineH + 8
 	moveWindow(a.status, 0, h-sbarH, w, sbarH)
-	// 4 segments: HTTP state label (takes the rest of the left) / panel address (drawn as a
-	// link) / total kills / total bounty. The first three are right edges; -1 on the last means
-	// "extend to the right edge".
-	statusBarSetParts(a.status, []int32{w - 500, w - 330, w - 180, -1})
+	// 5 segments: HTTP state label (takes the rest of the left) / panel address (drawn as a
+	// link) / total kills / mission progress / total bounty. The first four are right edges;
+	// -1 on the last means "extend to the right edge" (bounty, the widest, so it never clips).
+	statusBarSetParts(a.status, []int32{w - 620, w - 460, w - 300, w - 220, -1})
 	// The panel address is painted by the app (blue + underlined link), so that one segment
 	// switches the control into owner-draw mode. Idempotent, hence safe on every resize.
 	statusBarSetOwnerDraw(a.status, statusLinkPart)
