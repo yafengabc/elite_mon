@@ -37,6 +37,17 @@ import (
 
 const (
 	appClassName = "EliteMonWin32Class"
+	// appToolbarClassName is the window class for the edge toolbar shown when the main window
+	// is minimized with toolbar_edge set. A separate class (and wndProc) keeps the toolbar's
+	// minimal message handling away from the main window's tab/owner-draw logic.
+	appToolbarClassName = "EliteMonToolbarClass"
+
+	// toolbarRadius is the corner radius of the edge toolbar (clipped with a rounded-rect
+	// window region). toolbarInset pads the status text away from the rounded left/right ends;
+	// the same value is used when measuring the bar width and when drawing, so the text never
+	// hugs a corner and the padding stays symmetric.
+	toolbarRadius int32 = 12
+	toolbarInset  int32 = 14
 
 	// Child control IDs
 	idTabs    = 100 // native tab control (SysTabControl32)
@@ -279,8 +290,25 @@ type guiApp struct {
 	logNext   uint64
 	lastInfo  string
 	lastState string
-	lastStat  [5]string
+	lastStat  [6]string
 	stateErr  bool
+
+	// Edge toolbar (toolbar_edge): a thin, topmost window docked to a screen edge that shows the
+	// same status text as the bottom bar while the main window is minimized. It is a plain
+	// self-painted window (no child controls), so mouse input lands on it directly: press-drag
+	// moves it, double-click restores the main window, right-click opens the tray menu.
+	// toolbarMode is true while it is showing; lastToolbar caches the joined text so it is only
+	// repainted on change. toolbarDocked is true until the user drags the toolbar elsewhere;
+	// while false the bar keeps its dragged position and is only resized as the status text
+	// changes. toolbarX/Y remember the last placement so a plain click (no movement) does not
+	// count as a drag.
+	toolbar       syscall.Handle
+	toolbarMode   bool
+	toolbarDocked bool
+	toolbarX      int32
+	toolbarY      int32
+	lastToolbar   string
+	lastStatus    AppStatus // most recent snapshot, used to fill the toolbar the moment it appears
 
 	lastSummary string
 	lastShip    string
@@ -319,6 +347,7 @@ type feedRow struct {
 var app guiApp
 
 var wndProcPtr = syscall.NewCallback(wndProc)
+var toolbarWndProcPtr = syscall.NewCallback(toolbarWndProc)
 
 // Only "semantic colors" are kept here: warning / error / bounty hues.
 //
@@ -407,6 +436,10 @@ func runGUI() {
 		log.Println(T("log.win_class_reg_failed"))
 		return
 	}
+	if !app.registerToolbarClass(hInst) {
+		log.Println(T("log.win_class_reg_failed"))
+		return
+	}
 	if !app.createWindow(hInst) {
 		log.Println(T("log.win_create_failed"))
 		return
@@ -455,6 +488,23 @@ func (a *guiApp) registerClass(hInst syscall.Handle) bool {
 	if wc.HIconSm == 0 {
 		wc.HIconSm = wc.HIcon
 	}
+	return registerClassEx(&wc) != 0
+}
+
+// registerToolbarClass registers the window class for the edge toolbar. It is a plain popup
+// (no caption, no menu) that paints itself in WM_PAINT and has no child controls, so every
+// mouse message lands on it directly; CS_DBLCLKS is set so a double-click arrives as
+// WM_LBUTTONDBLCLK (restore the main window).
+func (a *guiApp) registerToolbarClass(hInst syscall.Handle) bool {
+	wc := wndClassExW{
+		Style:         csHRedraw | csVRedraw | csDblClk,
+		LpfnWndProc:   toolbarWndProcPtr,
+		HInstance:     hInst,
+		HCursor:       loadCursor(idcArrow),
+		HbrBackground: syscall.Handle(colorButtonFace + 1),
+		LpszClassName: utf16Ptr(appToolbarClassName),
+	}
+	wc.CbSize = uint32(unsafe.Sizeof(wc))
 	return registerClassEx(&wc) != 0
 }
 
@@ -633,6 +683,16 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		app.onCommand(wParam, lParam)
 		return 0
 
+	case wmSysCommand:
+		// The _ (minimize) button normally parks the window on the taskbar. With toolbar_edge
+		// set, collapse it into the edge toolbar instead, so "minimize" and "close" both tuck
+		// the app away the same way. Without toolbar_edge, fall through to the default minimise.
+		if wParam&0xFFF0 == scMinimize && cfg.ToolbarEdge != "" {
+			app.enterToolbarMode()
+			return 0
+		}
+		return defWindowProc(hwnd, msg, wParam, lParam)
+
 	case wmTimer:
 		if wParam == winTimerID {
 			app.refresh()
@@ -738,9 +798,14 @@ func wndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case wmClose:
-		// Closing the window is not quitting: monitoring and WxPusher push keep running, so
-		// collapse to the tray
-		app.hideToTray()
+		// Closing the window is not quitting: monitoring and WxPusher push keep running.
+		// With toolbar_edge set, collapse to the edge toolbar instead of only the tray; the
+		// tray icon is kept in both cases so the window is always recoverable.
+		if cfg.ToolbarEdge != "" {
+			app.enterToolbarMode()
+		} else {
+			app.hideToTray()
+		}
 		return 0
 
 	case wmDestroy:
@@ -1136,10 +1201,26 @@ func (a *guiApp) layout() {
 	// ---- Bottom status bar: height follows the font, segment widths follow the window ----
 	sbarH := a.lineH + 8
 	moveWindow(a.status, 0, h-sbarH, w, sbarH)
-	// 5 segments: HTTP state label (takes the rest of the left) / panel address (drawn as a
-	// link) / total kills / mission progress / total bounty. The first four are right edges;
-	// -1 on the last means "extend to the right edge" (bounty, the widest, so it never clips).
-	statusBarSetParts(a.status, []int32{w - 620, w - 460, w - 300, w - 220, -1})
+	// 6 segments: HTTP state label / panel address (drawn as a link) / total kills /
+	// kills in the last hour / mission progress / total bounty. The first five are right
+	// edges; -1 on the last means "extend to the right edge" (bounty, the widest, so it never
+	// clips). Clamp so a very narrow window never produces a negative (inverted) segment — at
+	// the 720px minimum the label and link simply shrink instead of breaking the layout.
+	edges := []int32{w - 770, w - 610, w - 450, w - 300, w - 220, -1}
+	prev := int32(0)
+	for i := range edges {
+		if edges[i] == -1 {
+			continue
+		}
+		if edges[i] < prev+1 {
+			edges[i] = prev + 1
+		}
+		if edges[i] > w {
+			edges[i] = w
+		}
+		prev = edges[i]
+	}
+	statusBarSetParts(a.status, edges)
 	// The panel address is painted by the app (blue + underlined link), so that one segment
 	// switches the control into owner-draw mode. Idempotent, hence safe on every resize.
 	statusBarSetOwnerDraw(a.status, statusLinkPart)
@@ -1247,6 +1328,19 @@ func measureText(hdc, hfont syscall.Handle, text string, width int32) int32 {
 	return r.Bottom - r.Top
 }
 
+// measureTextWidth measures the single-line width of text in the given font — used to size the
+// edge toolbar to its content so the bar is only as wide as the status text.
+func measureTextWidth(hdc, hfont syscall.Handle, text string) int32 {
+	if text == "" {
+		return 0
+	}
+	old := selectObject(hdc, hfont)
+	r := rectT{Right: 1 << 30}
+	drawText(hdc, text, &r, dtCalcRect|dtSingleLine|dtNoPrefix|dtLeft)
+	selectObject(hdc, old)
+	return r.Right - r.Left
+}
+
 // ------------------------------------------------------------------
 // Refresh
 // ------------------------------------------------------------------
@@ -1298,6 +1392,7 @@ func (a *guiApp) setState(st AppStatus) {
 // updated per segment, and only segments that actually changed are rewritten — so the whole
 // bar isn't repainted every 500ms.
 func (a *guiApp) setStatus(st AppStatus) {
+	a.lastStatus = st
 	parts := statusBarParts(st)
 
 	for i, t := range parts {
@@ -1315,6 +1410,35 @@ func (a *guiApp) setStatus(st AppStatus) {
 		}
 		statusBarSetText(a.status, i, t)
 	}
+
+	// Mirror the same status into the edge toolbar while it is showing: join the segments into
+	// one line and let WM_PAINT draw it (the toolbar is self-painted, no child status bar).
+	// Only repaint when the text changed. Re-dock too, because a wider status line needs a
+	// wider (still centred) bar. The leading spacer keeps the line clear of the rounded corner.
+	if a.toolbarMode && a.toolbar != 0 {
+		txt := joinStatus(parts[:])
+		if txt != a.lastToolbar {
+			a.lastToolbar = txt
+			a.positionToolbar()
+			invalidateRect(a.toolbar, nil)
+		}
+	}
+}
+
+// joinStatus turns the status segments into one line for the edge toolbar, skipping empty
+// cells (e.g. the link is empty when the panel is off) and separating the rest with a bar.
+func joinStatus(parts []string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("   |   ")
+		}
+		b.WriteString(p)
+	}
+	return b.String()
 }
 
 // overStatusLink reports whether the cursor sits on the status bar's address cell — the link.
@@ -1615,6 +1739,169 @@ func (a *guiApp) hideToTray() {
 func (a *guiApp) restore() {
 	showWindow(a.hwnd, swShow)
 	setForegroundWindow(a.hwnd)
+	if a.toolbar != 0 {
+		showWindow(a.toolbar, swHide)
+		a.toolbarMode = false
+	}
+}
+
+// enterToolbarMode collapses the main window into the edge toolbar: create it on first use,
+// dock it to the configured screen edge, show it, and hide the main window. The tray icon is
+// untouched, so the window is still recoverable from either the toolbar or the tray.
+func (a *guiApp) enterToolbarMode() {
+	if a.toolbar == 0 && !a.createToolbar() {
+		// Toolbar window could not be created — fall back to the tray so the window is
+		// never lost.
+		a.hideToTray()
+		return
+	}
+	// Every fresh entry into toolbar mode re-docks the bar to the configured edge, centred.
+	// Dragging it afterwards (see toolbarWndProc) pins it wherever the user puts it.
+	a.toolbarDocked = true
+	a.positionToolbar()
+	showWindow(a.toolbar, swShow)
+	a.toolbarMode = true
+	showWindow(a.hwnd, swHide)
+	// Fill the toolbar from the last snapshot right away, not on the next 500ms tick.
+	a.setStatus(a.lastStatus)
+}
+
+// createToolbar builds the edge-toolbar window. The window is a topmost, tool-window popup (no
+// taskbar entry, no focus steal); it paints its own background and status text in WM_PAINT.
+// Deliberately NO child controls: a child filling the bar would swallow the mouse input, so
+// drag / double-click / right-click must land on the toolbar window itself.
+func (a *guiApp) createToolbar() bool {
+	if a.toolbar != 0 {
+		return true
+	}
+	hInst := getModuleHandle()
+	hwnd := createWindowEx(wsExTopMost|wsExToolWindow|wsExNoActivate,
+		appToolbarClassName, "", wsPopup, 0, 0, 200, 24, 0, 0, hInst)
+	if hwnd == 0 {
+		return false
+	}
+	a.toolbar = hwnd
+	return true
+}
+
+// positionToolbar docks the toolbar to the configured edge of the primary monitor's work area
+// (SPI_GETWORKAREA already excludes the taskbar), so it never covers the taskbar. The bar is
+// sized to its status text and centred horizontally, so it is a compact pill rather than a
+// full-width strip that would hide other windows' title bar / close button. Its height matches
+// the main window's status bar.
+func (a *guiApp) positionToolbar() {
+	if a.toolbar == 0 {
+		return
+	}
+	barH := a.lineH + 8
+
+	var wa rectT
+	if !systemParametersInfo(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&wa)), 0) {
+		wa = rectT{0, 0, getSystemMetrics(smCxScreen), getSystemMetrics(smCyScreen)}
+	}
+	wWork := wa.Right - wa.Left
+
+	// Width follows the joined status text (+ symmetric padding) so the bar is only as wide as
+	// it needs to be; clamp to 80% of the work area so a very long line still leaves the screen
+	// edges clear.
+	barW := int32(120)
+	if hdc := getDC(a.toolbar); hdc != 0 {
+		barW = measureTextWidth(hdc, a.font, joinStatus(a.lastStat[:])) + toolbarInset*2
+		releaseDC(a.toolbar, hdc)
+	}
+	if barW > wWork*80/100 {
+		barW = wWork * 80 / 100
+	}
+	if barW < 120 {
+		barW = 120
+	}
+
+	var x, y int32
+	if a.toolbarDocked {
+		x = wa.Left + (wWork-barW)/2
+		y = wa.Top
+		if cfg.ToolbarEdge == "bottom" {
+			y = wa.Bottom - barH
+		}
+	} else {
+		// The user dragged the toolbar somewhere: keep its position, only resize it.
+		r := getWindowRect(a.toolbar)
+		x, y = r.Left, r.Top
+	}
+	moveWindow(a.toolbar, x, y, barW, barH)
+	a.toolbarX, a.toolbarY = x, y
+
+	// Round the corners. The toolbar is a frameless WS_POPUP, so clip it into a rounded rect via
+	// a window region; child controls (the status bar) are clipped to the parent's region too.
+	// The region is in window coordinates, so it must be rebuilt every time the bar is resized.
+	// CreateRoundRectRgn's last two args are the corner ELLIPSE's bounding box (width/height),
+	// so the corner radius is half of them: pass 2*radius.
+	hrgn := createRoundRectRgn(0, 0, barW, barH, toolbarRadius*2, toolbarRadius*2)
+	if !setWindowRgn(a.toolbar, hrgn, true) {
+		deleteObject(hrgn)
+	}
+}
+
+// toolbarWndProc is the edge toolbar's window procedure: press-drag moves the bar, double-click
+// restores the main window, a right click opens the same menu as the tray icon; WM_COMMAND
+// reuses the main menu handler. The bar is self-painted (no child controls). Destroying the
+// toolbar does not quit the application.
+func toolbarWndProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr {
+	switch msg {
+	case wmCommand:
+		app.onCommand(wParam, lParam)
+		return 0
+	case wmPaint:
+		// Draw the pill: flat theme background (the rounded-rect window region clips the
+		// corners) plus the joined status text, vertically centred and inset from both ends.
+		var ps paintStruct
+		hdc := beginPaint(hwnd, &ps)
+		if hdc != 0 {
+			rc := getClientRect(hwnd)
+			fillRect(hdc, &rc, getSysColorBrush(colorButtonFace))
+			if txt := app.lastToolbar; txt != "" {
+				rc.Left += toolbarInset
+				rc.Right -= toolbarInset
+				selectObject(hdc, app.font)
+				setBkMode(hdc, transparent)
+				setTextColor(hdc, getSysColor(colorButtonText))
+				drawText(hdc, txt, &rc, dtLeft|dtVCenter|dtSingleLine|dtNoPrefix|dtEndEllipsis)
+			}
+			endPaint(hwnd, &ps)
+		}
+		return 0
+	case wmEraseBkgnd:
+		return 1 // background is painted wholesale in WM_PAINT
+	case wmLButtonDown:
+		// Drag the toolbar anywhere on the screen: release the capture and re-dispatch the
+		// press as a caption-bar click so the system moves the window (the classic way to drag
+		// a frameless window). sendMessage blocks until the drag ends.
+		releaseCapture()
+		sendMessage(hwnd, wmNcLButtonDown, htCaption, 0)
+		return 0
+	case wmExitSizeMove:
+		// A mouse move has just ended. Only treat it as a real drag if the window actually
+		// moved (a plain click also enters the caption move loop and exits without moving):
+		// then stop auto-docking so the toolbar stays where the user put it, even when the
+		// status text changes and the bar is resized. It re-docks on the next entry into
+		// toolbar mode.
+		r := getWindowRect(hwnd)
+		if r.Left != app.toolbarX || r.Top != app.toolbarY {
+			app.toolbarDocked = false
+		}
+		return 0
+	case wmLButtonDblClk:
+		// Double-click the toolbar to bring the main window back. A single click is ignored on
+		// purpose, so a stray click on the thin bar does not pop the window up by accident.
+		app.restore()
+		return 0
+	case wmRButtonUp:
+		app.trayMenu()
+		return 0
+	case wmDestroy:
+		return 0
+	}
+	return defWindowProc(hwnd, msg, wParam, lParam)
 }
 
 func (a *guiApp) trayMenu() {
