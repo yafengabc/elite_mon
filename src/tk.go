@@ -200,15 +200,15 @@ grid .nb.t.c -row 0 -column 0 -sticky nsew -padx 6 -pady 2
 grid rowconfigure .nb.t 0 -weight 1
 grid columnconfigure .nb.t 0 -weight 1
 
-# ---- Bottom status bar (HTTP state / panel address / kills / bounty), same content as Win32 ----
+# ---- Bottom status bar (HTTP state / panel address / kills / mission progress / bounty), same content as Win32 ----
 # Placed below the button row: buttons are the window's actions, the status bar is the window's state.
-# Cells change at runtime (kills and bounty keep counting), so the Go side refills them every
-# refresh tick (tkStatusBar).
+# Cells change at runtime (kills, mission progress and bounty keep counting), so the Go side
+# refills them every refresh tick (tkStatusBar).
 ttk::separator .sbline -orient horizontal
 grid .sbline -row 3 -column 0 -sticky ew -pady 0
 ttk::frame .sb
 grid .sb -row 4 -column 0 -sticky ew -padx 8 -pady 3
-foreach p {p0 p1 p2 p3} {
+foreach p {p0 p1 p2 p3 p4} {
 	ttk::label .sb.$p -text "" -anchor w -font TkTextFont
 }
 # The panel address is a link: blue plus underline. ttk ignores -foreground, so the colour goes
@@ -222,20 +222,21 @@ grid .sb.p0 -row 0 -column 0 -sticky ew -padx 6
 grid .sb.p1 -row 0 -column 1 -sticky w -padx 6
 grid .sb.p2 -row 0 -column 2 -sticky w -padx 6
 grid .sb.p3 -row 0 -column 3 -sticky w -padx 6
-# Bounty (p3) fills the right edge, matching the Win32 status bar's last segment (-1); the
+grid .sb.p4 -row 0 -column 4 -sticky w -padx 6
+# Bounty (p4) fills the right edge, matching the Win32 status bar's last segment (-1); the
 # other cells keep their natural width and pack left, so the address (p1) sits right after the
 # state label and is a stable, clickable target.
-grid columnconfigure .sb 3 -weight 1
+grid columnconfigure .sb 4 -weight 1
 `)
 	return b.String()
 }
 
 // tkStatLast caches what the bottom status bar currently shows so the per-tick refresh only
-// talks to Tcl about cells that actually changed (kills / bounty tick over slowly).
-var tkStatLast [4]string
+// talks to Tcl about cells that actually changed (kills / mission progress / bounty tick over slowly).
+var tkStatLast [5]string
 
-// tkStatusBar fills the bottom status bar: HTTP state / panel address / total kills / total
-// bounty. Content comes from the same shared source as the Win32 build (statusBarParts).
+// tkStatusBar fills the bottom status bar: HTTP state / panel address / total kills / mission
+// progress / total bounty. Content comes from the same shared source as the Win32 build (statusBarParts).
 func tkStatusBar(st AppStatus) {
 	for i, txt := range statusBarParts(st) {
 		if tkStatLast[i] == txt {
