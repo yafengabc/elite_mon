@@ -34,11 +34,13 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
 
       # Capacitor 8 compiles at Java 21 and needs AGP 8.13 / Gradle 8.14.
-      - uses: actions/setup-java@v4
+      # No `cache: gradle`: the native project does not exist at checkout time
+      # (cap add android creates it later), and setup-java fails outright when it
+      # finds nothing to cache.
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
-          cache: gradle
 
       - uses: android-actions/setup-android@v3
 
