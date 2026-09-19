@@ -42,7 +42,16 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      # The ubuntu image already ships an Android SDK, so no setup action is
+      # needed. (android-actions/setup-android fails on current images: it asks
+      # sdkmanager for the "tools" package, which cmdline-tools 16 removed.)
+      # Gradle downloads whatever platform/build-tools this project needs.
+      - name: Locate the Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          ls "$SDK"
 
       - name: Install web dependencies
         working-directory: mobile
