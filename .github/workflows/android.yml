@@ -1,0 +1,161 @@
+name: Android
+
+# Builds the Android app without any Android toolchain on your machine:
+# this workflow installs Node, Java and the Android SDK itself.
+#
+# Two ways in:
+#   - workflow_dispatch: build on demand, artifacts only.
+#   - a v* tag: build and attach to the GitHub Release (release.yml creates it).
+#
+# Signing is optional on purpose. With the keystore secrets set you get a signed
+# APK and a signed AAB (Play-ready). Without them the build still succeeds and
+# falls back to a debug APK, which installs fine but cannot be uploaded to Play.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["mobile/**", ".github/workflows/android.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      # Capacitor 8 compiles at Java 21 and needs AGP 8.13 / Gradle 8.14.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install web dependencies
+        working-directory: mobile
+        run: npm ci
+
+      # The native project is generated here, not committed: it is a template
+      # copy plus your web assets, so it can always be recreated from scratch.
+      - name: Create the Android project
+        working-directory: mobile
+        run: npx cap add android
+
+      # Android 9+ refuses plain HTTP unless the app opts in. The app talks to a
+      # PC on the LAN over http://192.168.x.x:8088, so without this every API
+      # call fails with a cleartext error and the dashboard just sits empty.
+      # (Capacitor's template does not set it, and the manifest is regenerated
+      # on every build, so this patch has to run each time.)
+      - name: Allow cleartext traffic to the LAN
+        working-directory: mobile
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          if grep -q usesCleartextTraffic "$M"; then
+            echo "already present"
+          else
+            sed -i 's|<application|<application android:usesCleartextTraffic="true"|' "$M"
+          fi
+          grep -n usesCleartextTraffic "$M"
+
+      - name: Sync web assets into the project
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Build release APK and AAB
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease bundleRelease
+
+      # Always build it: the release APK is "unsigned" unless a keystore is
+      # configured, and an unsigned APK cannot be installed. The debug one is
+      # signed with the standard debug key, so there is always something usable
+      # to put on a phone.
+      - name: Build a debug APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Sign the release artifacts
+        working-directory: mobile/android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_ALIAS" ]; then
+            echo "::warning::No keystore secrets configured -- releasing the debug APK instead."
+            echo "::warning::Set ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD for signed builds."
+            exit 0
+          fi
+          echo "$KS_B64" | base64 -d > /tmp/upload.keystore
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT="$(ls -d "$SDK"/build-tools/*/ | tail -1)"
+          UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+
+          # APK: align first, then sign with apksigner (v2/v3 scheme).
+          "$BT/zipalign" -f 4 "$UNSIGNED" app/build/outputs/apk/release/app-release.apk
+          "$BT/apksigner" sign \
+            --ks /tmp/upload.keystore --ks-key-alias "$KS_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out app/build/outputs/apk/release/app-release-signed.apk \
+            app/build/outputs/apk/release/app-release.apk
+          "$BT/apksigner" verify app/build/outputs/apk/release/app-release-signed.apk
+
+          # AAB: jarsigner is the signing tool for bundles (no zipalign step).
+          jarsigner -keystore /tmp/upload.keystore -storepass "$KS_PASS" \
+            -keypass "$KEY_PASS" \
+            app/build/outputs/bundle/release/app-release.aab "$KS_ALIAS"
+          rm -f /tmp/upload.keystore
+
+      - name: Collect artifacts
+        working-directory: mobile/android
+        run: |
+          mkdir -p ../../out
+          # Prefer the signed pair; fall back to the debug APK so there is always
+          # something installable. The unsigned release APK is never shipped: it
+          # cannot be installed and would only invite confusion.
+          if [ -f app/build/outputs/apk/release/app-release-signed.apk ]; then
+            cp app/build/outputs/apk/release/app-release-signed.apk ../../out/
+            cp app/build/outputs/bundle/release/app-release.aab ../../out/ 2>/dev/null || true
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk ../../out/ 2>/dev/null || true
+          fi
+          ls -la ../../out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: out/
+
+      - name: Attach to the Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # release.yml creates the Release from the same tag; it usually lands
+          # first, but wait rather than assume - uploading to a Release that
+          # does not exist yet fails.
+          for i in $(seq 1 30); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            echo "waiting for the $TAG release to appear ($i)..."
+            sleep 10
+          done
+          FILES=""
+          [ -f out/app-release-signed.apk ] && FILES="$FILES out/app-release-signed.apk"
+          [ -f out/app-debug.apk ] && FILES="$FILES out/app-debug.apk"
+          [ -f out/app-release.aab ] && FILES="$FILES out/app-release.aab"
+          if [ -z "$FILES" ]; then echo "nothing to attach"; exit 0; fi
+          gh release upload "$TAG" $FILES --clobber

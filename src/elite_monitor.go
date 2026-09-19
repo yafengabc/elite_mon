@@ -1705,6 +1705,51 @@ func gzipHandler(next http.Handler) http.Handler {
 	})
 }
 
+// appOrigins are the only cross-origin callers allowed through.
+//
+// The mobile app (mobile/, Capacitor) ships its pages inside the APK, so they
+// are served from the device itself and its origin is http://localhost on
+// Android / capacitor://localhost on iOS. Every call it makes to this PC is
+// therefore cross-origin, and without these headers the browser blocks the
+// response and the app shows an empty dashboard.
+//
+// Deliberately not "*": the panel has no authentication, so a wildcard would
+// let any page you happen to open read your journal data. Same-origin requests
+// (the desktop panel, a phone browser on the LAN) send no Origin header at all
+// and are untouched.
+var appOrigins = map[string]bool{
+	"http://localhost":      true, // Android (androidScheme defaults to http)
+	"capacitor://localhost": true, // iOS
+}
+
+// corsHandler lets the mobile app read the API from its own origin.
+func corsHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if !appOrigins[origin] {
+			if origin != "" && r.Method == http.MethodOptions {
+				// A preflight from somewhere else: refuse it without ever
+				// reaching the handler.
+				http.Error(w, "forbidden origin", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r) // no Origin: same-origin, nothing to do
+			return
+		}
+
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", origin)
+		h.Add("Vary", "Origin") // caches must not serve this to a different origin
+		h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent) // a preflight has no body
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func statusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -1844,8 +1889,10 @@ func main() {
 
 	go (&monitor{}).run()
 
-	http.Handle("/api/status", gzipHandler(http.HandlerFunc(statusHandler)))
-	http.HandleFunc("/api/i18n", i18nHandler)
+	// corsHandler wraps only the two API routes: that is all the app asks for.
+	// The static files stay same-origin-only -- the app brings its own copies.
+	http.Handle("/api/status", corsHandler(gzipHandler(http.HandlerFunc(statusHandler))))
+	http.Handle("/api/i18n", corsHandler(http.HandlerFunc(i18nHandler)))
 	http.Handle("/", gzipHandler(http.HandlerFunc(staticHandler)))
 
 	// The rest is left to the build flavor; main is platform-independent here:

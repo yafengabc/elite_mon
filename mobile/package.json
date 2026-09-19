@@ -1,0 +1,20 @@
+{
+  "name": "elite-mon-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android shell for the elite_mon web panel, built entirely in CI",
+  "scripts": {
+    "sync": "cap sync android",
+    "add": "cap add android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/cli": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

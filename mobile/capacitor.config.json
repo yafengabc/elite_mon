@@ -1,0 +1,12 @@
+{
+  "appId": "com.yafeng.elitemon",
+  "appName": "ED Monitor",
+  "webDir": "www",
+  "loggingEnabled": false,
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "http"
+  }
+}

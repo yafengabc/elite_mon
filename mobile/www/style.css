@@ -1,0 +1,97 @@
+*{box-sizing:border-box;font-family:Consolas,Microsoft Yahei;}
+body{background:#111;color:#eee;padding:16px;margin:0;font-size:14px;}
+.container{max-width:1240px;margin:0 auto;}
+h3{color:#4cf;margin:12px 0 6px; border-bottom:1px solid #335; padding-bottom:4px;}
+.box{background:#181824;padding:12px;border-radius:6px;margin-bottom:16px;}
+.warn-box{border:1px solid #fa4;}
+.row{display:flex;gap:20px;flex-wrap:wrap;}
+.col{flex:1;min-width:380px;}
+.line{padding:3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.warn{color:#f66;}
+.good{color:#6f8;}
+.info{color:#acf;}
+.highlight{color:#fc4;}
+#bounty{display:grid;grid-template-columns:max-content max-content max-content max-content minmax(0,1fr);column-gap:6px;}
+#bounty .bamt{text-align:right;}
+#trend{position:relative;}
+#trend svg{display:block;width:100%;height:auto;}
+.ttip{position:absolute;display:none;z-index:5;max-width:92%;
+  background:#0c0c14;border:1px solid #4cf;border-radius:5px;
+  padding:6px 9px;font-size:12px;line-height:1.5;color:#e8e8f0;
+  pointer-events:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.55);}
+.tlegend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-bottom:2px;}
+.tlegend .k{color:#6f8;}
+.tlegend .b{color:#4cf;}
+.tlegend .note{color:#6a6a7a;}
+.headrow{display:flex;align-items:center;gap:16px;}
+.headrow h2{margin:0;white-space:nowrap;}
+.headrow #loginfo{flex:1;}
+
+/* ------------------------------------------------------------------
+   Mobile additions. The panel targets a fixed desktop viewport; these
+   rules make the same markup usable on a phone (safe areas, the server
+   setup sheet, and a single column on narrow screens).
+   ------------------------------------------------------------------ */
+
+/* viewport-fit=cover reaches under notches and the home bar, so the page has to
+   pad itself back out or the first and last rows sit under them. */
+body{
+    padding-left:max(16px, env(safe-area-inset-left));
+    padding-right:max(16px, env(safe-area-inset-right));
+    padding-top:max(16px, env(safe-area-inset-top));
+    padding-bottom:max(16px, env(safe-area-inset-bottom));
+    -webkit-text-size-adjust:100%;
+}
+
+.headrow h2{font-size:17px;}
+.headrow{gap:10px;}
+
+/* Gear: back to the server setup. 44px keeps it a comfortable tap target. */
+#btn-setup{
+    flex:0 0 auto; width:44px; height:44px; font-size:20px; line-height:1;
+    background:#23233a; color:#acf; border:1px solid #335; border-radius:6px;
+}
+#btn-setup:active{background:#2e2e4a;}
+
+.server-line{margin-top:8px;font-size:12px;color:#6a6a7a;}
+.server-line.good{color:#6f8;}
+.server-line.warn{color:#f66;}
+.server-line.info{color:#acf;}
+
+/* Setup sheet: a centred card over a dimmed backdrop. */
+#setup{
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center;
+    justify-content:center; padding:20px; background:rgba(0,0,0,.72);
+}
+#setup[hidden]{display:none;}
+.setup-card{
+    width:100%; max-width:420px; background:#181824; border:1px solid #335;
+    border-radius:10px; padding:18px;
+}
+.setup-card h2{margin:0 0 10px; font-size:18px; color:#4cf; border:0;}
+.setup-card .hint{margin:0 0 12px; font-size:13px; line-height:1.6; color:#9a9aae;}
+.setup-card code{color:#fc4;}
+#server-input{
+    width:100%; height:44px; padding:0 10px; font-size:15px;
+    color:#eee; background:#0e0e18; border:1px solid #335; border-radius:6px;
+}
+.setup-actions{margin-top:12px;}
+#server-save{
+    width:100%; height:44px; font-size:15px; color:#fff;
+    background:#2a5cd8; border:0; border-radius:6px;
+}
+#server-save:active{background:#1f49b0;}
+.setup-msg{margin-top:10px; font-size:13px; line-height:1.5; color:#9a9aae;}
+.setup-msg.warn{color:#f66;}
+.setup-msg.info{color:#acf;}
+
+/* Phones: stack the two columns instead of forcing the panel's 380px minimum. */
+@media (max-width:520px){
+    body{padding-left:max(10px, env(safe-area-inset-left));
+         padding-right:max(10px, env(safe-area-inset-right));
+         padding-top:max(10px, env(safe-area-inset-top));
+         padding-bottom:max(10px, env(safe-area-inset-bottom));}
+    .col{min-width:100%;}
+    .row{gap:12px;}
+    .headrow h2{font-size:15px; white-space:normal;}
+}

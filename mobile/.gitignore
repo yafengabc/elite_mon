@@ -1,0 +1,9 @@
+# The native projects are generated in CI (see .github/workflows/android.yml),
+# so no Android SDK, Java or Gradle is needed locally.
+node_modules/
+android/
+ios/
+
+# Build output
+*.apk
+*.aab
