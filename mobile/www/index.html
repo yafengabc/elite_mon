@@ -81,6 +81,10 @@
 	<button type="button" data-tab="settings">设置</button>
 </nav>
 
+<!-- Capacitor's browser bundle defines the global the Preferences plugin is
+     registered through. Loaded first so app.js can reach it. In a plain
+     browser there is no native bridge and app.js falls back to localStorage. -->
+<script src="capacitor.js"></script>
 <script src="app.js"></script>
 <script src="main.js"></script>
 </body>

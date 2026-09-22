@@ -4,11 +4,25 @@
 // The panel is served by elite_mon itself, so it can fetch "/api/status" as a
 // relative path. The app cannot: its pages come from the phone, which makes its
 // origin http://localhost -- a relative fetch would ask the phone, not the PC.
-// So the PC's address is kept here (localStorage) and prefixed onto every API
-// call. main.js only knows about apiBase() / setServerStatus() / showSetup().
+// So the PC's address is kept here (Capacitor Preferences, falling back to
+// localStorage in a browser) and prefixed onto every API call. main.js only
+// knows about apiBase() / setServerStatus() / showSetup().
 //
 // This layer also owns the bottom tab bar: four fixed pages (monitor /
 // bounty / events / settings) instead of one long scrolling page.
+// ------------------------------------------------------------------
+
+// ------------------------------------------------------------------
+// Address storage.
+//
+// On the phone this goes through @capacitor/preferences, which lands in the
+// platform store (SharedPreferences on Android) and survives app updates far
+// better than WebView localStorage. In a plain browser (the panel preview, or
+// a desktop browser) there is no native bridge, so we fall back to
+// localStorage -- same keys, same shape, so nothing else has to branch.
+//
+// Everything is async now because Preferences is. A small in-memory mirror
+// keeps apiBase() synchronous, which main.js calls on every poll.
 // ------------------------------------------------------------------
 
 const SERVER_KEY = "elitemon.server";
@@ -16,6 +30,79 @@ const HISTORY_KEY = "elitemon.history";
 const TAB_KEY = "elitemon.tab";
 const TABS = ["monitor", "bounty", "events", "settings"];
 const HISTORY_MAX = 8;
+
+// Synchronous mirror of the persisted values, filled by loadStore() before the
+// first poll. main.js reads apiBase() synchronously on every tick.
+const store = {
+    server: "",
+    history: [],
+    tab: "monitor",
+    ready: false,
+};
+
+// The Preferences plugin, when running inside the native shell. Registering a
+// plugin that the platform does not ship throws on call, so every use is
+// guarded -- absence is a normal condition (browser), not an error.
+function preferencesPlugin(){
+    try{
+        const cap = window.Capacitor;
+        if(!cap){ return null; }
+        // "web" means the bridge is a stub; localStorage is the better path.
+        if(typeof cap.getPlatform === "function" && cap.getPlatform() === "web"){ return null; }
+        if(typeof cap.registerPlugin !== "function"){ return null; }
+        return cap.registerPlugin("Preferences");
+    }catch(e){
+        return null;
+    }
+}
+
+// One read per key, preferring the native store and falling back to
+// localStorage. Returning the fallback keeps behaviour identical in a browser.
+async function readKey(key){
+    const P = preferencesPlugin();
+    if(P){
+        try{
+            const r = await P.get({ key: key });
+            if(r && typeof r.value === "string" && r.value !== ""){ return r.value; }
+        }catch(e){ /* fall through to localStorage */ }
+    }
+    try{ return localStorage.getItem(key); }catch(e){ return null; }
+}
+
+async function writeKey(key, value){
+    const P = preferencesPlugin();
+    if(P){
+        try{ await P.set({ key: key, value: value }); }catch(e){ /* fall back */ }
+    }
+    // Always mirror into localStorage too: harmless when native storage worked,
+    // and it is the only copy in a browser.
+    try{ localStorage.setItem(key, value); }catch(e){}
+}
+
+async function removeKey(key){
+    const P = preferencesPlugin();
+    if(P){
+        try{ await P.remove({ key: key }); }catch(e){}
+    }
+    try{ localStorage.removeItem(key); }catch(e){}
+}
+
+// Populate the mirror once, before init() polls. A corrupt history value must
+// not break startup, so parsing is guarded.
+async function loadStore(){
+    store.server = normalizeAddr(await readKey(SERVER_KEY) || "");
+    store.tab = await readKey(TAB_KEY) || "monitor";
+    if(TABS.indexOf(store.tab) < 0){ store.tab = "monitor"; }
+    try{
+        const raw = JSON.parse(await readKey(HISTORY_KEY) || "[]");
+        store.history = Array.isArray(raw)
+            ? raw.filter(function(a){ return typeof a === "string" && a; })
+            : [];
+    }catch(e){
+        store.history = [];
+    }
+    store.ready = true;
+}
 
 // Accepts a bare IP ("192.168.1.5"), host:port, or a full URL. A missing
 // scheme becomes http:// and a missing port becomes the panel's default 8088,
@@ -30,7 +117,7 @@ function normalizeAddr(raw){
 }
 
 function apiBase(){
-    return normalizeAddr(localStorage.getItem(SERVER_KEY));
+    return store.server;
 }
 
 // ------------------------------------------------------------------
@@ -40,23 +127,19 @@ function apiBase(){
 // rejected never pollutes the list.
 // ------------------------------------------------------------------
 function getHistory(){
-    try{
-        const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-        return Array.isArray(raw) ? raw.filter(function(a){ return typeof a === "string" && a; }) : [];
-    }catch(e){
-        return [];   // a corrupted value must not break the settings page
-    }
+    return store.history.slice();
 }
 
 function rememberServer(addr){
-    if(!addr){ return; }
-    const next = [addr].concat(getHistory().filter(function(a){ return a !== addr; }));
-    try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(next.slice(0, HISTORY_MAX))); }catch(e){}
+    if(!addr){ return Promise.resolve(); }
+    store.history = [addr].concat(store.history.filter(function(a){ return a !== addr; }))
+        .slice(0, HISTORY_MAX);
+    return writeKey(HISTORY_KEY, JSON.stringify(store.history));
 }
 
 function forgetServer(addr){
-    const next = getHistory().filter(function(a){ return a !== addr; });
-    try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); }catch(e){}
+    store.history = store.history.filter(function(a){ return a !== addr; });
+    return writeKey(HISTORY_KEY, JSON.stringify(store.history));
 }
 
 // Render the chips. Hidden entirely on first run, when there is nothing to show.
@@ -133,16 +216,13 @@ function switchTab(name){
         if(input && document.activeElement !== input){ input.value = apiBase(); }
         renderHistory();
     }
-    try{ localStorage.setItem(TAB_KEY, name); }catch(e){}
+    store.tab = name;
+    writeKey(TAB_KEY, name);
     window.scrollTo(0, 0);
 }
 
 function currentTab(){
-    try{
-        const t = localStorage.getItem(TAB_KEY);
-        if(t && TABS.indexOf(t) >= 0){ return t; }
-    }catch(e){}
-    return "monitor";
+    return TABS.indexOf(store.tab) >= 0 ? store.tab : "monitor";
 }
 
 // main.js calls this when no server is configured yet (and via the gear).
@@ -184,11 +264,14 @@ async function saveServer(){
         const res = await fetch(addr + "/api/status", {cache:"no-store"});
         if(!res.ok){ throw new Error("HTTP " + res.status); }
         // Only an address that actually answered goes into the history.
-        rememberServer(addr);
-        localStorage.setItem(SERVER_KEY, addr);
+        // Both writes must land before the reload, or the address would be
+        // lost -- so they are awaited, not fired and forgotten.
+        await rememberServer(addr);
+        await writeKey(SERVER_KEY, addr);
         // Land on the dashboard after connecting, and keep one code path:
         // the reload lets init() find an address and start polling.
-        try{ localStorage.setItem(TAB_KEY, "monitor"); }catch(e){}
+        store.tab = "monitor";
+        await writeKey(TAB_KEY, "monitor");
         location.reload();
     }catch(e){
         if(msg){
@@ -198,6 +281,13 @@ async function saveServer(){
         }
     }
 }
+
+// Kick the store load off immediately (top level of app.js), so it overlaps
+// with parsing main.js instead of starting after it. main.js awaits this
+// promise before its first poll: apiBase() is synchronous, so reading it
+// before the load lands would look like "no server configured" and wrongly
+// bounce the user to the setup page.
+const storeReady = loadStore();
 
 function wireSetup(){
     const btnSave = document.getElementById("server-save");
@@ -221,7 +311,10 @@ function wireSetup(){
         });
     }
 
-    switchTab(currentTab());
+    // switchTab() persists the tab, so it must not run before the stored value
+    // has been read -- it would write the default over the saved one. Chain it
+    // off storeReady instead of calling it straight away.
+    storeReady.then(function(){ switchTab(currentTab()); });
 }
 
 wireSetup();

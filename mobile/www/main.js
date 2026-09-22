@@ -302,6 +302,11 @@ async function poll(){
 // show raw ids. A failure here is not fatal: ids are readable-ish and the panels
 // still populate, and /api/status reports the real error.
 async function init(){
+    // app.js owns the persisted address (Capacitor Preferences, with a
+    // localStorage fallback). It loads asynchronously, so wait for it before
+    // reading apiBase() -- otherwise the first run looks configured as "none"
+    // and the user is bounced to the setup page on every launch.
+    if(typeof storeReady !== "undefined"){ await storeReady; }
     if(!apiBase()){ showSetup(); return; }   // first run: ask for the PC address
     setServerStatus("connecting", apiBase());
     try{
