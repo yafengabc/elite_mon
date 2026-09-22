@@ -120,6 +120,7 @@ updated_dash  = "更新于 -"
 # ---- data panel summary   数据面板汇总 ----
 [strings.summary]
 missions         = "任务进度：已完成 {0} / 共 {1}（进行中 {2}）"
+missions_failed   = "任务进度：已完成 {0} / 共 {1}（进行中 {2} · 失败 {3}）"
 missions_none    = "任务进度：暂无任务数据（未读到 Missions 事件）"
 ship_unavailable = "无法读取舰船信息"
 span_bounty      = "最近 {0}赏金：{1} Cr"

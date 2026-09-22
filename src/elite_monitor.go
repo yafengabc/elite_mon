@@ -385,12 +385,16 @@ type AppStatus struct {
 	Error         string       `json:"error,omitempty"`
 
 	// Mission progress: baselined on the last Missions event, then adjusted
-	// incrementally by MissionAccepted / MissionCompleted / MissionRedirected.
+	// incrementally by MissionAccepted / MissionCompleted / MissionRedirected /
+	// MissionFailed / MissionAbandoned.
 	// done = ready to hand in + completed after redirect; total = current
-	// mission count; active = still in progress.
+	// mission count (failed missions stay in the game's list, so they count
+	// too); active = still in progress; failed = failed/abandoned but still
+	// listed.
 	MissionDone   int `json:"mission_done"`
 	MissionActive int `json:"mission_active"`
 	MissionTotal  int `json:"mission_total"`
+	MissionFailed int `json:"mission_failed"`
 }
 
 type BountyItem struct {
@@ -435,6 +439,7 @@ type JournalEvent struct {
 	ShieldsUp *bool           `json:"ShieldsUp"`
 	Rewards   []BountyReward  `json:"Rewards"`
 	Active    []MissionActive `json:"Active"`
+	Failed    []MissionActive `json:"Failed"`
 
 	From               string `json:"From"`
 	FromLocalised      string `json:"From_Localised"`
@@ -612,6 +617,7 @@ type monitor struct {
 	missionDoneIDs    map[int64]struct{} // IDs of those missions, so they can be removed by ID
 	missionInProgress map[int64]struct{} // still in progress (Expires>0 in the list + accepted later)
 	missionRedirected map[int64]struct{} // received MissionRedirected after the list, counted as done
+	missionFailed     map[int64]struct{} // failed/abandoned, still shown in the game's task list
 }
 
 type shipInfo struct {
@@ -709,6 +715,7 @@ func (m *monitor) collect(st *AppStatus, lines []string, reset bool) {
 		m.missionDoneIDs = nil
 		m.missionInProgress = nil
 		m.missionRedirected = nil
+		m.missionFailed = nil
 	}
 
 	var drop shieldDrop
@@ -762,7 +769,10 @@ func (m *monitor) collect(st *AppStatus, lines []string, reset bool) {
 	// after the list
 	st.MissionDone = m.missionsDoneBase + len(m.missionRedirected)
 	st.MissionTotal = m.missionsTotal
-	st.MissionActive = m.missionsTotal - st.MissionDone
+	st.MissionFailed = len(m.missionFailed)
+	// Active = total minus the ones already done and the ones that failed;
+	// failed missions still sit in the list, so they are excluded from "active".
+	st.MissionActive = m.missionsTotal - st.MissionDone - st.MissionFailed
 	if st.MissionActive < 0 {
 		st.MissionActive = 0
 	}
@@ -991,7 +1001,9 @@ func (m *monitor) handle(evt JournalEvent, evTime time.Time, drop *shieldDrop) {
 	case "Missions":
 		// Every Missions event carries the full current mission list, so it
 		// simply overwrites the baseline.
-		m.missionsTotal = len(evt.Active)
+		// Failed/abandoned missions remain in the game's task list (marked
+		// FAILED) until removed, so they count toward the total too.
+		m.missionsTotal = len(evt.Active) + len(evt.Failed)
 		done := 0
 		doneIDs := make(map[int64]struct{})
 		inProg := make(map[int64]struct{})
@@ -1006,6 +1018,11 @@ func (m *monitor) handle(evt JournalEvent, evTime time.Time, drop *shieldDrop) {
 		m.missionsDoneBase = done
 		m.missionDoneIDs = doneIDs
 		m.missionInProgress = inProg
+		failed := make(map[int64]struct{})
+		for _, f := range evt.Failed {
+			failed[f.MissionID] = struct{}{}
+		}
+		m.missionFailed = failed
 		// New baseline: earlier "completed by redirect" counts are void; only
 		// redirects after this list count
 		m.missionRedirected = make(map[int64]struct{})
@@ -1037,9 +1054,10 @@ func (m *monitor) handle(evt JournalEvent, evTime time.Time, drop *shieldDrop) {
 		}
 
 	case "MissionFailed", "MissionAbandoned":
-		// Failed / abandoned: also leaves the Active list, so total -1.
-		// It was in progress, never counted as done, so done is unchanged.
-		m.dropMission(evt.MissionID, false)
+		// Failed / abandoned missions stay in the game's task list (shown as
+		// FAILED), so they remain in the total count and just move from "in
+		// progress" to "failed"; only the breakdown changes.
+		m.noteMissionFailed(evt.MissionID)
 
 	case "MissionRedirected":
 		// This redirect counts as a completion only if the mission was still in
@@ -1160,6 +1178,29 @@ func (m *monitor) dropMission(id int64, assumeDone bool) {
 	// but has no matching event in the journal
 	if assumeDone && m.missionsDoneBase > 0 {
 		m.missionsDoneBase--
+	}
+}
+
+// noteMissionFailed records a failed/abandoned mission. The game keeps it in
+// the task list (marked FAILED) until the player removes it, so it stays in
+// the total count — it only moves out of "in progress" and into the failed
+// set, changing the breakdown rather than the total. If it was previously
+// "ready to hand in" (Expires==0) that done count drops too, since a failed
+// mission is no longer ready to hand in; same for a redirect counted as done.
+func (m *monitor) noteMissionFailed(id int64) {
+	if m.missionFailed == nil {
+		m.missionFailed = make(map[int64]struct{})
+	}
+	m.missionFailed[id] = struct{}{}
+	delete(m.missionInProgress, id)
+	if _, ok := m.missionDoneIDs[id]; ok { // was "ready to hand in"
+		delete(m.missionDoneIDs, id)
+		if m.missionsDoneBase > 0 {
+			m.missionsDoneBase--
+		}
+	}
+	if _, ok := m.missionRedirected[id]; ok { // counted as done via redirect earlier
+		delete(m.missionRedirected, id)
 	}
 }
 

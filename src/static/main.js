@@ -210,11 +210,13 @@ function render(data){
     const mDone = Number(data.mission_done);
     const mTotal = Number(data.mission_total);
     const mActive = Number(data.mission_active);
+    const mFailed = Number(data.mission_failed);
     if(mTotal > 0){
-        s += '<div class="line">' + T("summary.missions",
+        s += '<div class="line">' + T("summary.missions_failed",
             '<span class="good">' + mDone + '</span>',
             '<span class="info">' + mTotal + '</span>',
-            mActive) + '</div>';
+            mActive,
+            mFailed) + '</div>';
     }else{
         s += '<div class="line">' + T("summary.missions_none") + '</div>';
     }

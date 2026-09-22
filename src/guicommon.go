@@ -102,8 +102,8 @@ func buildSummary(st AppStatus) string {
 		T("summary.span_bounty", win, commas(st.HourBounty)) + missionNote(st.HourMissionReward),
 	}
 	if st.MissionTotal > 0 {
-		lines = append(lines, T("summary.missions",
-			st.MissionDone, st.MissionTotal, st.MissionActive))
+		lines = append(lines, T("summary.missions_failed",
+			st.MissionDone, st.MissionTotal, st.MissionActive, st.MissionFailed))
 	} else {
 		lines = append(lines, T("summary.missions_none"))
 	}
