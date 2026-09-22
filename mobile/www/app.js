@@ -7,13 +7,13 @@
 // So the PC's address is kept here (localStorage) and prefixed onto every API
 // call. main.js only knows about apiBase() / setServerStatus() / showSetup().
 //
-// This layer also owns the bottom tab bar: three fixed pages (monitor /
-// records / settings) instead of one long scrolling page.
+// This layer also owns the bottom tab bar: four fixed pages (monitor /
+// bounty / events / settings) instead of one long scrolling page.
 // ------------------------------------------------------------------
 
 const SERVER_KEY = "elitemon.server";
 const TAB_KEY = "elitemon.tab";
-const TABS = ["monitor", "records", "settings"];
+const TABS = ["monitor", "bounty", "events", "settings"];
 
 // Accepts a bare IP ("192.168.1.5"), host:port, or a full URL. A missing
 // scheme becomes http:// and a missing port becomes the panel's default 8088,
@@ -50,6 +50,17 @@ function switchTab(name){
     }
     try{ localStorage.setItem(TAB_KEY, name); }catch(e){}
     window.scrollTo(0, 0);
+    // Long log lists read best newest-first, like a chat: open them at the end.
+    if(name === "bounty" || name === "events"){ scrollListToEnd("page-" + name); }
+}
+
+// The log pages are taller than the screen, so the newest row sits below the
+// fold. Jump to the bottom on open (the back-to-top button scrolls back up).
+function scrollListToEnd(pageId){
+    requestAnimationFrame(function(){
+        const page = document.getElementById(pageId);
+        if(page){ window.scrollTo(0, page.scrollHeight); }
+    });
 }
 
 function currentTab(){
