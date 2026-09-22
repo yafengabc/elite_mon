@@ -63,11 +63,16 @@ jobs:
         working-directory: mobile
         run: npx cap add android
 
+      - name: Sync web assets into the project
+        working-directory: mobile
+        run: npx cap sync android
+
       # Android 9+ refuses plain HTTP unless the app opts in. The app talks to a
       # PC on the LAN over http://192.168.x.x:8088, so without this every API
       # call fails with a cleartext error and the dashboard just sits empty.
-      # (Capacitor's template does not set it, and the manifest is regenerated
-      # on every build, so this patch has to run each time.)
+      # (Capacitor's template does not set it, and `cap sync` can regenerate the
+      # manifest on top of our edit, so this patch runs AFTER sync and is
+      # idempotent -- it always takes effect on the manifest we actually build.)
       - name: Allow cleartext traffic to the LAN
         working-directory: mobile
         run: |
@@ -78,10 +83,6 @@ jobs:
             sed -i 's|<application|<application android:usesCleartextTraffic="true"|' "$M"
           fi
           grep -n usesCleartextTraffic "$M"
-
-      - name: Sync web assets into the project
-        working-directory: mobile
-        run: npx cap sync android
 
       - name: Build release APK and AAB
         working-directory: mobile/android
