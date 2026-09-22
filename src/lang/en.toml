@@ -109,7 +109,7 @@ updated_dash  = "Updated -"
 # ---- data panel summary   数据面板汇总 ----
 [strings.summary]
 missions         = "Missions: {0} done / {1} total ({2} active)"
-missions_failed   = "Missions: {0} done / {1} total ({2} active · {3} failed)"
+missions_failed   = "Missions: {0} done / {1} total ({2} active) · {3} failed"
 missions_none    = "Missions: no data (no Missions event read)"
 ship_unavailable = "Cannot read ship info"
 span_bounty      = "Bounty in last {0}: {1} Cr"

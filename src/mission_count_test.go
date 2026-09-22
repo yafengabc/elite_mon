@@ -189,10 +189,8 @@ func TestMissionCompletedReward(t *testing.T) {
 }
 
 // TestMissionFailedAndAbandoned verifies failure/abandonment under the rule that
-// a failed/abandoned mission stays in the game's task list (marked FAILED) until
-// removed, so it still counts toward the total. It moves out of "active" and into
-// the "failed" set; the done count is untouched unless the failed mission was one
-// awaiting delivery (Expires==0).
+// a failed/abandoned mission leaves the task list, so it drops out of the total.
+// The failed set is reported as a side note only and never feeds the total.
 func TestMissionFailedAndAbandoned(t *testing.T) {
 	m := &monitor{}
 
@@ -207,44 +205,39 @@ func TestMissionFailedAndAbandoned(t *testing.T) {
 		t.Fatalf("baseline: total=%d done=%d want 3/1", m.missionsTotal, m.missionsDoneBase)
 	}
 
-	// Fail an active mission: it stays in the list as FAILED, so total is still
-	// 3; active 2->1, failed 0->1
+	// Fail an active mission: it leaves the list, so total 3->2
 	m.handle(JournalEvent{Event: "MissionFailed", MissionID: 2}, time.Time{}, &shieldDrop{})
-	if m.missionsTotal != 3 {
-		t.Fatalf("after fail: total=%d want 3 (failed still counts)", m.missionsTotal)
-	}
-	if len(m.missionFailed) != 1 {
-		t.Fatalf("after fail: failed=%d want 1", len(m.missionFailed))
-	}
-	active := m.missionsTotal - (m.missionsDoneBase + len(m.missionRedirected)) - len(m.missionFailed)
-	if active != 1 {
-		t.Fatalf("after fail: active=%d want 1", active)
+	if m.missionsTotal != 2 || len(m.missionFailed) != 1 {
+		t.Fatalf("after fail: total=%d failed=%d want 2/1", m.missionsTotal, len(m.missionFailed))
 	}
 
-	// Abandon one: total still 3, failed 1->2, active 1->0
+	// Abandon one: total 2->1, failed 1->2
 	m.handle(JournalEvent{Event: "MissionAbandoned", MissionID: 3}, time.Time{}, &shieldDrop{})
-	if m.missionsTotal != 3 || len(m.missionFailed) != 2 {
-		t.Fatalf("after abandon: total=%d failed=%d want 3/2", m.missionsTotal, len(m.missionFailed))
-	}
-	active = m.missionsTotal - (m.missionsDoneBase + len(m.missionRedirected)) - len(m.missionFailed)
-	if active != 0 {
-		t.Fatalf("after abandon: active=%d want 0", active)
+	if m.missionsTotal != 1 || len(m.missionFailed) != 2 {
+		t.Fatalf("after abandon: total=%d failed=%d want 1/2", m.missionsTotal, len(m.missionFailed))
 	}
 
-	// Duplicate events must not double-count the failed set; total stays 3
+	// A repeated event must not decrement the total twice
 	m.handle(JournalEvent{Event: "MissionFailed", MissionID: 2}, time.Time{}, &shieldDrop{})
-	if m.missionsTotal != 3 || len(m.missionFailed) != 2 {
-		t.Fatalf("duplicate fail: total=%d failed=%d want 3/2", m.missionsTotal, len(m.missionFailed))
+	if m.missionsTotal != 1 || len(m.missionFailed) != 2 {
+		t.Fatalf("duplicate fail: total=%d failed=%d want 1/2", m.missionsTotal, len(m.missionFailed))
+	}
+
+	// An id that was never tracked (left over from an earlier session) is noted
+	// but must not eat into the total
+	m.handle(JournalEvent{Event: "MissionFailed", MissionID: 99}, time.Time{}, &shieldDrop{})
+	if m.missionsTotal != 1 || len(m.missionFailed) != 3 {
+		t.Fatalf("stale fail: total=%d failed=%d want 1/3", m.missionsTotal, len(m.missionFailed))
 	}
 
 	// An "awaiting delivery" mission fails on timeout: it leaves the done count
-	// (done -1) and joins the failed set, total still 3
+	// (done -1) as well as the total
 	m.handle(JournalEvent{Event: "MissionFailed", MissionID: 1}, time.Time{}, &shieldDrop{})
 	if d := m.missionsDoneBase + len(m.missionRedirected); d != 0 {
 		t.Fatalf("fail of a waiting-delivery mission: done=%d want 0", d)
 	}
-	if len(m.missionFailed) != 3 || m.missionsTotal != 3 {
-		t.Fatalf("after all failed: failed=%d total=%d want 3/3", len(m.missionFailed), m.missionsTotal)
+	if m.missionsTotal != 0 || len(m.missionFailed) != 4 {
+		t.Fatalf("after all failed: total=%d failed=%d want 0/4", m.missionsTotal, len(m.missionFailed))
 	}
 }
 
