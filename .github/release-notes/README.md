@@ -1,15 +1,19 @@
-# Release notes archive
+# Release notes
 
-These files are **archives / drafts only** — nothing here is published
-automatically.
+One file per version (`vX.Y.Z.md`), bilingual (`## English` → `## 中文` →
+`---` → `Full Changelog` link).
 
-Release bodies are maintained by hand with `gh`:
+`release.yml` reads `.github/release-notes/<tag>.md` at publish time and uses it
+as the Release body (the annotated-tag body is unreliable on the runner, which
+stores a tag push as a lightweight ref). So: write the notes here, commit them,
+then push the `v*` tag and the body is correct automatically.
+
+You can still override by hand with `gh` afterwards:
 
 ```sh
-gh release edit v1.0.9 --notes-file notes.md   # or: --notes "..."
+gh release edit v1.0.10 --notes-file v1.0.10.md   # or: --notes "..."
 ```
 
-Editing a file in this folder does **not** change any published Release.
-Whenever you write notes here for a new version, either pass the same file to
-`git tag -a vX.Y.Z -F <file>` before pushing the tag, or apply it afterwards
-with the `gh release edit` command above.
+(Editing a file here does not retroactively change an already-published Release;
+run the `gh release edit` command above to push a change.)
+

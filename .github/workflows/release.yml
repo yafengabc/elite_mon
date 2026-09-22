@@ -86,15 +86,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Release notes come from the annotated tag body written at tag time
-          # (git tag -a vX.Y.Z -F notes.txt / -m "..."). Fall back to the
-          # subject line when the tag has no body.
+          # Release notes come from the committed draft in .github/release-notes/
+          # (one file per version, bilingual). We use the file rather than the
+          # annotated-tag body on purpose: actions/checkout stores a tag push as
+          # a lightweight ref on the runner, so %(contents:body) would fall back
+          # to the commit message and publish that as the release notes.
           #
-          # After publishing, the body is edited by hand with gh:
+          # After publishing, the body can still be edited by hand with gh:
           #   gh release edit vX.Y.Z --notes-file notes.md   (or --notes "...")
-          # There is no workflow that rewrites it: .github/release-notes/ is an
-          # archive/draft folder only and is NEVER synced into a release.
-          TAG_NOTES="$(git for-each-ref --format='%(contents:body)' "refs/tags/$GITHUB_REF_NAME")"
+          # The file is the source of truth; .github/release-notes/ is NOT
+          # auto-synced, it is simply read here at publish time.
+          TAG_NOTES=""
+          NOTES_FILE=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            TAG_NOTES="$(cat "$NOTES_FILE")"
+          fi
+          if [ -z "$TAG_NOTES" ]; then
+            TAG_NOTES="$(git for-each-ref --format='%(contents:body)' "refs/tags/$GITHUB_REF_NAME")"
+          fi
           if [ -z "$TAG_NOTES" ]; then
             TAG_NOTES="$(git for-each-ref --format='%(contents:subject)' "refs/tags/$GITHUB_REF_NAME")"
           fi
