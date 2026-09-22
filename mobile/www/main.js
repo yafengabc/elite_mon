@@ -188,9 +188,10 @@ function render(data){
         return;
     }
 
-    let head = T("panel.log_file", esc(data.log_file_name));
-    if(data.updated_at){ head += T("panel.updated_suffix", esc(data.updated_at)); }
-    setHTML("loginfo", head);
+    // The app hides the journal-file line: on a narrow phone screen it wraps
+    // into three tall rows. The web panel (src/static) keeps showing it; the
+    // error paths above still use #loginfo as their surface.
+    setHTML("loginfo", "");
     renderTrend(data.kill_trend, data.trend_window_text);
 
     // Total bounty includes mission rewards, so show the subtotal to reveal the breakdown
