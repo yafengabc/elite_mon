@@ -34,12 +34,13 @@ h3{color:#4cf;margin:12px 0 6px; border-bottom:1px solid #335; padding-bottom:4p
    ------------------------------------------------------------------ */
 
 /* viewport-fit=cover reaches under notches and the home bar, so the page has to
-   pad itself back out or the first and last rows sit under them. */
+   pad itself back out -- and the fixed tab bar at the bottom needs headroom of
+   its own (52px bar + 16px gap), on top of the home-bar inset. */
 body{
     padding-left:max(16px, env(safe-area-inset-left));
     padding-right:max(16px, env(safe-area-inset-right));
     padding-top:max(16px, env(safe-area-inset-top));
-    padding-bottom:max(16px, env(safe-area-inset-bottom));
+    padding-bottom:calc(76px + env(safe-area-inset-bottom));
     -webkit-text-size-adjust:100%;
 }
 
@@ -58,15 +59,27 @@ body{
 .server-line.warn{color:#f66;}
 .server-line.info{color:#acf;}
 
-/* Setup sheet: a centred card over a dimmed backdrop. */
-#setup{
-    position:fixed; inset:0; z-index:50; display:flex; align-items:center;
-    justify-content:center; padding:20px; background:rgba(0,0,0,.72);
+/* Tab pages: only one visible at a time. Hidden pages keep rendering so
+   switching tabs never shows stale data. */
+.page[hidden]{display:none;}
+
+/* Bottom tab bar, lifted above the home-bar inset. */
+.tabbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; background:#181824; border-top:1px solid #335;
+    padding-bottom:env(safe-area-inset-bottom);
 }
-#setup[hidden]{display:none;}
+.tabbar button{
+    flex:1; height:52px; border:0; background:transparent; color:#9a9aae;
+    font-size:15px;
+}
+.tabbar button.active{color:#4cf; font-weight:bold;}
+.tabbar button:active{background:#23233a;}
+
+/* Connection card, inline on the settings tab. */
 .setup-card{
-    width:100%; max-width:420px; background:#181824; border:1px solid #335;
-    border-radius:10px; padding:18px;
+    width:100%; max-width:420px; margin:0 auto; background:#181824;
+    border:1px solid #335; border-radius:10px; padding:18px;
 }
 .setup-card h2{margin:0 0 10px; font-size:18px; color:#4cf; border:0;}
 .setup-card .hint{margin:0 0 12px; font-size:13px; line-height:1.6; color:#9a9aae;}
@@ -90,7 +103,7 @@ body{
     body{padding-left:max(10px, env(safe-area-inset-left));
          padding-right:max(10px, env(safe-area-inset-right));
          padding-top:max(10px, env(safe-area-inset-top));
-         padding-bottom:max(10px, env(safe-area-inset-bottom));}
+         padding-bottom:calc(66px + env(safe-area-inset-bottom));}
     .col{min-width:100%;}
     .row{gap:12px;}
     .headrow h2{font-size:15px; white-space:normal;}

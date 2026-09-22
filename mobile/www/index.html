@@ -11,67 +11,70 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- Server setup: shown on first run (or via the gear) because the app runs from
-     the phone itself and has to be told where the PC is. -->
-<div id="setup" hidden>
-	<div class="setup-card">
-		<h2>连接电脑</h2>
-		<p class="hint">填写运行 elite_mon 那台电脑的地址。电脑端状态栏上显示的就是它
-		（形如 <code>http://192.168.1.5:8088</code>）。手机与电脑需在同一局域网。</p>
-		<input id="server-input" type="url" inputmode="url" autocapitalize="off"
-		       autocorrect="off" spellcheck="false" placeholder="http://192.168.1.5:8088">
-		<div class="setup-actions">
-			<button id="server-save" type="button">保存并连接</button>
-		</div>
-		<div id="setup-msg" class="setup-msg"></div>
-	</div>
-</div>
-
+<!-- Three tab pages, switched by the bottom bar (app.js). Only one is visible
+     at a time; the hidden ones keep their DOM so polling keeps updating them. -->
 <div class="container">
-	<div class="box headbox">
-		<div class="headrow">
-			<h2 id="title-h2" data-i18n="panel.title">精英危险 实时监控面板</h2>
-			<div id="loginfo" data-i18n="panel.loading">加载中...</div>
-			<button id="btn-setup" type="button" title="服务器设置">⚙</button>
-		</div>
-		<div id="server-line" class="server-line"></div>
-	</div>
 
-	<div class="box">
-		<h3 id="title-trend" data-i18n="panel.trend_title">击杀趋势</h3>
-		<div id="trend"></div>
-	</div>
-
-	<div class="row">
-		<div class="col">
-			<div class="box">
-				<h3 id="title-summary" data-i18n="tab.summary">统计汇总</h3>
-				<div id="summary"></div>
+	<div class="page" id="page-monitor">
+		<div class="box headbox">
+			<div class="headrow">
+				<h2 id="title-h2" data-i18n="panel.title">精英危险 实时监控面板</h2>
+				<div id="loginfo" data-i18n="panel.loading">加载中...</div>
+				<button id="btn-setup" type="button" title="服务器设置">⚙</button>
 			</div>
+			<div id="server-line" class="server-line"></div>
 		</div>
-		<div class="col">
-			<div class="box">
-				<h3 id="title-ship" data-i18n="tab.ship">舰船信息</h3>
-				<div id="cargo"></div>
-			</div>
+
+		<div class="box">
+			<h3 id="title-trend" data-i18n="panel.trend_title">击杀趋势</h3>
+			<div id="trend"></div>
+		</div>
+
+		<div class="box">
+			<h3 id="title-summary" data-i18n="tab.summary">统计汇总</h3>
+			<div id="summary"></div>
+		</div>
+
+		<div class="box">
+			<h3 id="title-ship" data-i18n="tab.ship">舰船信息</h3>
+			<div id="cargo"></div>
 		</div>
 	</div>
 
-	<div class="row">
-		<div class="col">
-			<div class="box">
-				<h3 id="title-bounty" data-i18n="tab.bounty_mission">赏金日志（含任务赏金）</h3>
-				<div id="bounty"></div>
-			</div>
+	<div class="page" id="page-records" hidden>
+		<div class="box">
+			<h3 id="title-bounty" data-i18n="tab.bounty_mission">赏金日志（含任务赏金）</h3>
+			<div id="bounty"></div>
 		</div>
-		<div class="col">
-			<div class="box">
-				<h3 id="title-msg" data-i18n="tab.events">事件消息</h3>
-				<div id="msg"></div>
-			</div>
+
+		<div class="box">
+			<h3 id="title-msg" data-i18n="tab.events">事件消息</h3>
+			<div id="msg"></div>
 		</div>
 	</div>
+
+	<div class="page" id="page-settings" hidden>
+		<div class="setup-card">
+			<h2>连接电脑</h2>
+			<p class="hint">填运行 elite_mon 那台电脑的 IP 就行，默认端口 8088 会自动补上；
+			也可以填完整地址（形如 <code>http://192.168.1.5:8088</code>）。手机与电脑需在同一局域网。</p>
+			<input id="server-input" type="text" inputmode="url" autocapitalize="off"
+			       autocorrect="off" spellcheck="false" placeholder="192.168.1.5">
+			<div class="setup-actions">
+				<button id="server-save" type="button">保存并连接</button>
+			</div>
+			<div id="setup-msg" class="setup-msg"></div>
+		</div>
+	</div>
+
 </div>
+
+<nav class="tabbar" id="tabbar">
+	<button type="button" class="active" data-tab="monitor">监控</button>
+	<button type="button" data-tab="records">战绩</button>
+	<button type="button" data-tab="settings">设置</button>
+</nav>
+
 <script src="app.js"></script>
 <script src="main.js"></script>
 </body>
