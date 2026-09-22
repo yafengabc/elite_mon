@@ -50,17 +50,6 @@ function switchTab(name){
     }
     try{ localStorage.setItem(TAB_KEY, name); }catch(e){}
     window.scrollTo(0, 0);
-    // Long log lists read best newest-first, like a chat: open them at the end.
-    if(name === "bounty" || name === "events"){ scrollListToEnd("page-" + name); }
-}
-
-// The log pages are taller than the screen, so the newest row sits below the
-// fold. Jump to the bottom on open (the back-to-top button scrolls back up).
-function scrollListToEnd(pageId){
-    requestAnimationFrame(function(){
-        const page = document.getElementById(pageId);
-        if(page){ window.scrollTo(0, page.scrollHeight); }
-    });
 }
 
 function currentTab(){

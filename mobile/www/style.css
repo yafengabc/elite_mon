@@ -63,6 +63,11 @@ body{
    switching tabs never shows stale data. */
 .page[hidden]{display:none;}
 
+/* The two log feeds are dense, many-row lists, so they run a size down from
+   the rest of the app (13px against the body's 14px) with tighter leading. */
+#bounty .line, #msg .line{font-size:13px; line-height:1.45; padding:2px 0;}
+#page-bounty h3, #page-events h3{font-size:15px;}
+
 /* Bottom tab bar, lifted above the home-bar inset. */
 .tabbar{
     position:fixed; left:0; right:0; bottom:0; z-index:20;
