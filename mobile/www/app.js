@@ -12,8 +12,10 @@
 // ------------------------------------------------------------------
 
 const SERVER_KEY = "elitemon.server";
+const HISTORY_KEY = "elitemon.history";
 const TAB_KEY = "elitemon.tab";
 const TABS = ["monitor", "bounty", "events", "settings"];
+const HISTORY_MAX = 8;
 
 // Accepts a bare IP ("192.168.1.5"), host:port, or a full URL. A missing
 // scheme becomes http:// and a missing port becomes the panel's default 8088,
@@ -32,6 +34,87 @@ function apiBase(){
 }
 
 // ------------------------------------------------------------------
+// Connection history: every address that ever connected successfully, most
+// recent first, so a known PC can be re-picked with one tap instead of
+// retyped. Only successful connections are recorded -- a typo the probe
+// rejected never pollutes the list.
+// ------------------------------------------------------------------
+function getHistory(){
+    try{
+        const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+        return Array.isArray(raw) ? raw.filter(function(a){ return typeof a === "string" && a; }) : [];
+    }catch(e){
+        return [];   // a corrupted value must not break the settings page
+    }
+}
+
+function rememberServer(addr){
+    if(!addr){ return; }
+    const next = [addr].concat(getHistory().filter(function(a){ return a !== addr; }));
+    try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(next.slice(0, HISTORY_MAX))); }catch(e){}
+}
+
+function forgetServer(addr){
+    const next = getHistory().filter(function(a){ return a !== addr; });
+    try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); }catch(e){}
+}
+
+// Render the chips. Hidden entirely on first run, when there is nothing to show.
+function renderHistory(){
+    const box = document.getElementById("server-history");
+    if(!box){ return; }
+    const list = getHistory();
+    const current = apiBase();
+    if(!list.length){ box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    let s = '<div class="hist-title">历史地址</div><div class="hist-chips">';
+    list.forEach(function(addr){
+        s += '<span class="hist-chip' + (addr === current ? " current" : "") + '">'
+            + '<button type="button" class="hist-use" data-addr="' + escAttr(addr) + '">'
+            + escHtml(addr) + '</button>'
+            + '<button type="button" class="hist-del" data-addr="' + escAttr(addr) + '"'
+            + ' title="移除">×</button>'
+            + '</span>';
+    });
+    s += '</div>';
+    box.innerHTML = s;
+
+    box.querySelectorAll(".hist-use").forEach(function(b){
+        b.addEventListener("click", function(){ useHistory(b.dataset.addr); });
+    });
+    box.querySelectorAll(".hist-del").forEach(function(b){
+        b.addEventListener("click", function(ev){ ev.stopPropagation(); dropHistory(b.dataset.addr); });
+    });
+}
+
+function escHtml(s){
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function escAttr(s){
+    return escHtml(s).replace(/"/g, "&quot;");
+}
+
+// Fill the field and probe it, exactly like typing it by hand.
+function useHistory(addr){
+    const input = document.getElementById("server-input");
+    if(input){ input.value = addr; }
+    saveServer();
+}
+
+// A chip can be removed without leaving the settings page.
+function dropHistory(addr){
+    forgetServer(addr);
+    renderHistory();
+    const m = document.getElementById("setup-msg");
+    if(m){
+        m.textContent = apiBase() === addr
+            ? "已从历史中移除（当前连接不受影响，仍在使用该地址）"
+            : "已从历史中移除";
+        m.className = "setup-msg info";
+    }
+}
+
+// ------------------------------------------------------------------
 // Tab bar. Pages stay in the DOM while hidden, so main.js can keep
 // rendering into them no matter which tab is on screen.
 // ------------------------------------------------------------------
@@ -43,10 +126,12 @@ function switchTab(name){
         const btn = document.querySelector('#tabbar button[data-tab="' + t + '"]');
         if(btn){ btn.className = (t === name) ? "active" : ""; }
     });
-    // Show the stored address as the starting point for edits.
+    // Show the stored address as the starting point for edits, plus the list
+    // of addresses that connected before (so a known PC is one tap away).
     if(name === "settings"){
         const input = document.getElementById("server-input");
         if(input && document.activeElement !== input){ input.value = apiBase(); }
+        renderHistory();
     }
     try{ localStorage.setItem(TAB_KEY, name); }catch(e){}
     window.scrollTo(0, 0);
@@ -71,6 +156,7 @@ function showSetup(msg){
         input.value = apiBase();
         setTimeout(function(){ input.focus(); }, 50);
     }
+    renderHistory();
 }
 
 // Shown under the title so the address being polled is never a guess.
@@ -97,6 +183,8 @@ async function saveServer(){
     try{
         const res = await fetch(addr + "/api/status", {cache:"no-store"});
         if(!res.ok){ throw new Error("HTTP " + res.status); }
+        // Only an address that actually answered goes into the history.
+        rememberServer(addr);
         localStorage.setItem(SERVER_KEY, addr);
         // Land on the dashboard after connecting, and keep one code path:
         // the reload lets init() find an address and start polling.

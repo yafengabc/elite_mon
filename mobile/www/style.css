@@ -103,6 +103,26 @@ body{
 .setup-msg.warn{color:#f66;}
 .setup-msg.info{color:#acf;}
 
+/* Connection history: one chip per address that connected before. */
+#server-history[hidden]{display:none;}
+#server-history{margin-top:16px; padding-top:14px; border-top:1px solid #335;}
+.hist-title{font-size:12px; color:#6a6a7a; margin-bottom:8px;}
+.hist-chips{display:flex; flex-wrap:wrap; gap:8px;}
+.hist-chip{
+    display:inline-flex; align-items:stretch; overflow:hidden;
+    border:1px solid #335; border-radius:6px; background:#0e0e18;
+}
+.hist-chip.current{border-color:#2a5cd8;}
+.hist-chip button{
+    border:0; background:transparent; color:#acf; font-size:13px;
+    padding:8px 4px 8px 10px; font-family:Consolas,Microsoft Yahei;
+}
+.hist-chip .hist-use:active{background:#23233a;}
+.hist-chip .hist-del{
+    padding:8px 10px 8px 6px; color:#6a6a7a; font-size:15px; line-height:1;
+}
+.hist-chip .hist-del:active{background:#2e2e4a; color:#f66;}
+
 /* Phones: stack the two columns instead of forcing the panel's 380px minimum. */
 @media (max-width:520px){
     body{padding-left:max(10px, env(safe-area-inset-left));
