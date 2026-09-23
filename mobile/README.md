@@ -19,9 +19,11 @@ mobile/
 
 桌面面板是**同源**的：`fetch("/api/status")` 就是它自己。App 不行——它的页面来自手机，
 origin 是 `http://localhost`，相对路径只会去问手机自己。所以 `app.js` 引入了一个
-`apiBase()`：地址存在 localStorage 里，首次启动弹设置面板让你填电脑上那台
-elite_mon 的地址（状态栏上显示的就是，形如 `http://192.168.1.5:8088`），填完点「保存并连接」，
-它会**先试连一次**再保存，避免手滑打错就陷入无限「连接失败」。
+`apiBase()`：地址存在 **Capacitor Preferences**（安卓侧落到原生 SharedPreferences，升级 App
+不会丢；纯浏览器预览回退到 localStorage），在「设置」页填电脑上那台 elite_mon 的地址
+（状态栏上显示的就是，只填 IP 即可，`192.168.1.5` 会自动补成 `http://192.168.1.5:8088`），
+填完点「保存并连接」，它会**先试连一次**再保存，避免手滑打错就陷入无限「连接失败」；
+连上过的地址会进连接历史，点一下即可回填重连。
 
 这份代码是**独立副本**，不与 `src/static/` 共享，两边各自演进。
 
@@ -46,12 +48,15 @@ python -m http.server 8000 -d www    # 打开 http://localhost:8000
 
 | 触发 | 结果 |
 |---|---|
-| Actions 里手动 **Run workflow** | 出 APK/AAB，作为 artifact 下载（保留 90 天） |
-| 推 `v*` tag | 同上，并挂到该版本的 Release |
-| 改动 `mobile/**` 的 PR | 只做一次完整构建校验 |
+| Actions 里手动 **Run workflow** | 出 `elite-mon-dev-<短sha>.apk` + `.aab`，作为 artifact 下载（保留 90 天） |
+| 推 `v*` tag | 出 `elite-mon-<tag>.apk` + `.aab`，并挂到该版本的 Release |
+| 改动 `mobile/**` 的 PR | 只做构建校验：PR 拿不到 secrets，不签名、不产出 |
 
-CI 做的是：`npm ci` → `npx cap add android` → 允许明文 → `cap sync` →
-`gradlew assembleRelease bundleRelease` → 签名 → 上传。
+CI 做的是：`npm ci` → `npx cap add android` → `cap sync` → 允许明文 →
+`gradlew assembleRelease bundleRelease` → 签名（apksigner / jarsigner）→ 产出。
+
+产物文件名带版本号。build 自己产出的名字（`app-release-signed.apk`）看不出是哪一版，
+而旧版在缺密钥时回退用的 `app-debug.apk` 放在 Release 里像是出错——两个都换掉了。
 
 ## 两个安卓特有的坑（CI 已处理，改结构时别丢）
 
@@ -62,27 +67,45 @@ CI 做的是：`npm ci` → `npx cap add android` → 允许明文 → `cap sync
    请求电脑上的 `/api/status` 属于跨域。**服务端必须放行这两个 origin**，否则浏览器直接拦掉。
    见 elite_monitor.go 里的 CORS 处理。
 
-## 签名（可选，上架 Play 才需要）
+## 签名（必需）
 
-CI 在无密钥时也能成功，只是退化为**调试签名的 debug APK**（能装，但不能上架）。
-要出签名包，一次性准备 keystore：
+CI **必须**拿到签名密钥，缺了就直接失败、不发布。原因不是洁癖：release APK 未签名时
+**根本装不上**，而回退成 debug 版又是拿**公开的** Android debug key 签的（谁都能签出同名包，
+证明不了来源），文件名 `app-debug.apk` 放在 Release 里也像是出错。
 
-```sh
-# 需要 JDK（只此一次；换台有 JDK 的机器生成也行）
-keytool -genkey -v -keystore elite-mon.jks -alias elitemon \
-        -keyalg RSA -keysize 2048 -validity 10000
+密钥库在 `keystore/`（整目录已 gitignore，**不入库**）：
 
-base64 -w 0 elite-mon.jks > elite-mon.jks.b64      # Git Bash
-```
+| | |
+|---|---|
+| 文件 | `keystore/elite-mon.p12`（PKCS12，4096 位 RSA，有效期 100 年） |
+| 别名 | `elitemon` |
+| 密码 | `keystore/password.txt` |
 
-把下面四个填进仓库 Settings → Secrets and variables → Actions：
+仓库 Settings → Secrets and variables → Actions 里的四个：
 
 | Secret | 值 |
 |---|---|
-| `ANDROID_KEYSTORE_BASE64` | `elite-mon.jks.b64` 的内容 |
-| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEYSTORE_BASE64` | `keystore/keystore.b64` 的内容 |
+| `ANDROID_KEYSTORE_PASSWORD` | `keystore/password.txt` 的内容 |
 | `ANDROID_KEY_ALIAS` | `elitemon` |
-| `ANDROID_KEY_PASSWORD` | 该别名的密码 |
+| `ANDROID_KEY_PASSWORD` | 同上（PKCS12 只有一个密码位） |
 
-⚠️ keystore 丢了就无法更新已上架的应用（Play 只认同一把钥匙）——请连同密码另存一份。
-⚠️ `*.jks` 与 `*.b64` 不要提交进仓库。
+一次性设置：
+
+```sh
+gh secret set ANDROID_KEYSTORE_BASE64   < keystore/keystore.b64
+gh secret set ANDROID_KEYSTORE_PASSWORD < keystore/password.txt
+gh secret set ANDROID_KEY_PASSWORD      < keystore/password.txt
+gh secret set ANDROID_KEY_ALIAS --body elitemon
+```
+
+要重建密钥库（本机没 JDK 也能做）：
+
+```sh
+pip install cryptography
+python mobile/make_keystore.py
+```
+
+⚠️ **keystore 丢了就再也无法覆盖安装**——Android 只认同一把钥匙，换钥匙必须让用户先卸载。
+把它连同密码备份到**仓库之外**（密码管理器 / 离线存储）。
+⚠️ `keystore/` 已 gitignore；别把它移出这个目录，否则会连同密码一起被提交。

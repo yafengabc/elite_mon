@@ -6,6 +6,11 @@
 # credential. Delete the file to regenerate a default one.
 config.toml
 
+# Android signing key. Losing it means the app can never be updated in place --
+# Android refuses an APK signed with a different key -- so keep a backup outside
+# the repo. Deliberately not committed; the CI copy lives in repo secrets.
+/keystore/
+
 # Runtime language files, extracted next to the config on first run. The
 # canonical copies live in src/lang/ and are embedded in the binary; these are
 # just the user-editable copies. Root-anchored, so src/lang/ stays tracked.

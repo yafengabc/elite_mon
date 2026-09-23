@@ -1,6 +1,6 @@
 {
   "appId": "com.yafeng.elitemon",
-  "appName": "ED Monitor",
+  "appName": "ED监控面板",
   "webDir": "www",
   "loggingEnabled": false,
   "android": {

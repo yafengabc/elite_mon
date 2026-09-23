@@ -63,9 +63,15 @@ body{
    switching tabs never shows stale data. */
 .page[hidden]{display:none;}
 
-/* The two log feeds are dense, many-row lists, so they run a size down from
-   the rest of the app (13px against the body's 14px) with tighter leading. */
-#bounty .line, #msg .line{font-size:13px; line-height:1.45; padding:2px 0;}
+/* The two log feeds are dense, many-row lists, so they run well below the
+   body size. --log-size / --log-line are the only two knobs to touch when
+   tuning density; both are read by the rule below.
+   Note the rendered size on a phone is not exactly this: Android's WebView
+   multiplies CSS px by the system font scale, and nothing in
+   @capacitor/android pins textZoom, so a device set to large text renders
+   these rows bigger than a desktop preview shows. */
+:root{--log-size:10px; --log-line:1.35;}
+#bounty .line, #msg .line{font-size:var(--log-size); line-height:var(--log-line); padding:1px 0;}
 #page-bounty h3, #page-events h3{font-size:15px;}
 
 /* Bottom tab bar, lifted above the home-bar inset. */

@@ -7,9 +7,13 @@ name: Android
 #   - workflow_dispatch: build on demand, artifacts only.
 #   - a v* tag: build and attach to the GitHub Release (release.yml creates it).
 #
-# Signing is optional on purpose. With the keystore secrets set you get a signed
-# APK and a signed AAB (Play-ready). Without them the build still succeeds and
-# falls back to a debug APK, which installs fine but cannot be uploaded to Play.
+# Signing is required. The release APK is unsigned until it is signed, and an
+# unsigned APK cannot be installed, so the workflow fails when the keystore
+# secrets are missing rather than falling back to a debug build. A debug APK is
+# signed with the *public* Android debug key -- it proves nothing about where it
+# came from, and its name ("app-debug.apk") reads like a mistake in a release.
+# Pull requests are the exception: secrets are never exposed to them, so they
+# build for the compile check and publish nothing.
 on:
   workflow_dispatch:
   push:
@@ -90,14 +94,6 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease bundleRelease
 
-      # Always build it: the release APK is "unsigned" unless a keystore is
-      # configured, and an unsigned APK cannot be installed. The debug one is
-      # signed with the standard debug key, so there is always something usable
-      # to put on a phone.
-      - name: Build a debug APK
-        working-directory: mobile/android
-        run: ./gradlew --no-daemon assembleDebug
-
       - name: Sign the release artifacts
         working-directory: mobile/android
         env:
@@ -107,9 +103,13 @@ jobs:
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "$KS_B64" ] || [ -z "$KS_ALIAS" ]; then
-            echo "::warning::No keystore secrets configured -- releasing the debug APK instead."
-            echo "::warning::Set ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD for signed builds."
-            exit 0
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::keystore secrets are not exposed to pull requests -- signing skipped."
+              echo "SKIP_RELEASE=1" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "::error::No keystore secrets. Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD (see mobile/README.md); refusing to publish an unsigned APK."
+            exit 1
           fi
           echo "$KS_B64" | base64 -d > /tmp/upload.keystore
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
@@ -123,7 +123,9 @@ jobs:
             --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
             --out app/build/outputs/apk/release/app-release-signed.apk \
             app/build/outputs/apk/release/app-release.apk
-          "$BT/apksigner" verify app/build/outputs/apk/release/app-release-signed.apk
+          # --print-certs puts the signer's fingerprint in the log, so the run
+          # itself proves which key signed the artifact.
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/release/app-release-signed.apk
 
           # AAB: jarsigner is the signing tool for bundles (no zipalign step).
           jarsigner -keystore /tmp/upload.keystore -storepass "$KS_PASS" \
@@ -132,23 +134,23 @@ jobs:
           rm -f /tmp/upload.keystore
 
       - name: Collect artifacts
+        if: env.SKIP_RELEASE != '1'
         working-directory: mobile/android
         run: |
           mkdir -p ../../out
-          # Prefer the signed pair; fall back to the debug APK so there is always
-          # something installable. The unsigned release APK is never shipped: it
-          # cannot be installed and would only invite confusion.
-          if [ -f app/build/outputs/apk/release/app-release-signed.apk ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk ../../out/
-            cp app/build/outputs/bundle/release/app-release.aab ../../out/ 2>/dev/null || true
-          else
-            cp app/build/outputs/apk/debug/app-debug.apk ../../out/ 2>/dev/null || true
-          fi
+          # Version the names: the build's own ("app-release-signed.apk") say
+          # nothing about which build it is, and a download should be
+          # self-describing. On a tag that is the tag; on a manual run, the
+          # branch is not useful, so a short sha identifies it.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME}"; else V="dev-$(echo "${GITHUB_SHA}" | cut -c1-7)"; fi
+          cp app/build/outputs/apk/release/app-release-signed.apk "../../out/elite-mon-${V}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "../../out/elite-mon-${V}.aab"
           ls -la ../../out
 
       - uses: actions/upload-artifact@v4
+        if: env.SKIP_RELEASE != '1'
         with:
-          name: android-build
+          name: elite-mon-apk
           path: out/
 
       - name: Attach to the Release
@@ -166,8 +168,10 @@ jobs:
             sleep 10
           done
           FILES=""
-          [ -f out/app-release-signed.apk ] && FILES="$FILES out/app-release-signed.apk"
-          [ -f out/app-debug.apk ] && FILES="$FILES out/app-debug.apk"
-          [ -f out/app-release.aab ] && FILES="$FILES out/app-release.aab"
+          # Glob rather than hardcoding names, so renaming the artifacts in the
+          # Collect step cannot silently leave this one uploading nothing.
+          for f in out/*.apk out/*.aab; do
+            if [ -f "$f" ]; then FILES="$FILES $f"; fi
+          done
           if [ -z "$FILES" ]; then echo "nothing to attach"; exit 0; fi
           gh release upload "$TAG" $FILES --clobber
