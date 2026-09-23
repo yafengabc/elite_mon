@@ -48,15 +48,19 @@ python -m http.server 8000 -d www    # 打开 http://localhost:8000
 
 | 触发 | 结果 |
 |---|---|
-| Actions 里手动 **Run workflow** | 出 `elite-mon-dev-<短sha>.apk` + `.aab`，作为 artifact 下载（保留 90 天） |
-| 推 `v*` tag | 出 `elite-mon-<tag>.apk` + `.aab`，并挂到该版本的 Release |
+| Actions 里手动 **Run workflow** | 出 `elite-mon-<git describe>.apk` + `.aab`，作为 artifact 下载（保留 90 天） |
+| 推 `v*` tag | 同上命名，并挂到该版本的 Release |
 | 改动 `mobile/**` 的 PR | 只做构建校验：PR 拿不到 secrets，不签名、不产出 |
 
 CI 做的是：`npm ci` → `npx cap add android` → `cap sync` → 允许明文 →
 `gradlew assembleRelease bundleRelease` → 签名（apksigner / jarsigner）→ 产出。
 
-产物文件名带版本号。build 自己产出的名字（`app-release-signed.apk`）看不出是哪一版，
-而旧版在缺密钥时回退用的 `app-debug.apk` 放在 Release 里像是出错——两个都换掉了。
+产物文件名取自 `git describe --tags --always`，与桌面版二进制里的版本串同一个口径：
+提交正好被打过 tag 时就是 tag 名（`elite-mon-v1.0.11.apk`），否则是
+`<tag>-<tag 之后的提交数>-g<短sha>`（`elite-mon-v1.0.11-1-g27b2f3b.apk`）。
+不加 `dev` 之类的前缀——两种触发方式产出的都是同一份 release 签名构建，前缀只会让人
+以为有个「非正式版」。checkout 因此需要 `fetch-depth: 0`（浅克隆没有 tag，`git describe`
+会静默退回纯 sha）。
 
 ## 两个安卓特有的坑（CI 已处理，改结构时别丢）
 

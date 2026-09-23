@@ -29,7 +29,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # fetch-depth: 0 is here for `git describe` in Collect artifacts, which
+      # needs the tags. The default shallow clone carries none, and describe
+      # would quietly fall back to a bare hash instead of failing.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -138,11 +143,14 @@ jobs:
         working-directory: mobile/android
         run: |
           mkdir -p ../../out
-          # Version the names: the build's own ("app-release-signed.apk") say
-          # nothing about which build it is, and a download should be
-          # self-describing. On a tag that is the tag; on a manual run, the
-          # branch is not useful, so a short sha identifies it.
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME}"; else V="dev-$(echo "${GITHUB_SHA}" | cut -c1-7)"; fi
+          # Version the names: the build's own output ("app-release-signed.apk")
+          # says nothing about which build it is, and a download should be
+          # self-describing. git describe produces the same string the desktop
+          # binaries carry -- the tag on a tagged commit, otherwise
+          # <tag>-<commits since>-g<sha> -- so a file name and a binary
+          # version agree. (No "dev" prefix: this is a release build either way,
+          # and an invented prefix only invites the debug/not-debug question.)
+          V="$(git describe --tags --always)"
           cp app/build/outputs/apk/release/app-release-signed.apk "../../out/elite-mon-${V}.apk"
           cp app/build/outputs/bundle/release/app-release.aab "../../out/elite-mon-${V}.aab"
           ls -la ../../out
